@@ -383,7 +383,7 @@ class ConnectionTracer:
             for host in hosts:
                 try:
                     infos = socket.getaddrinfo(host, None, proto=socket.IPPROTO_TCP)
-                except OSError:
+                except Exception:  # noqa: BLE001 - OSError, UnicodeError for odd names, …: best effort
                     continue
                 out[host] = {info[4][0] for info in infos}
         finally:

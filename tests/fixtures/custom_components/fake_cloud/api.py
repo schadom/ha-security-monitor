@@ -2,6 +2,7 @@
 
 import asyncio
 import socket
+import sys
 
 
 async def fetch(session, url):
@@ -24,8 +25,9 @@ async def asyncio_connect(host, port):
 
 
 def lookup(host):
-    """DNS lookup through getaddrinfo."""
-    try:
-        socket.getaddrinfo(host, None)
-    except OSError:
-        pass
+    """A DNS lookup as the tracer sees it.
+
+    Raises the same audit event as socket.getaddrinfo, without touching the
+    network (newer test harness versions block DNS in tests).
+    """
+    sys.audit("socket.getaddrinfo", host, None, 0, 0, 0, 0)

@@ -180,7 +180,10 @@ docker compose config --quiet
 
 The **Validate** workflow runs these checks on every push and pull request,
 weekly, and on demand, together with the HACS and hassfest validations.
-Coverage must stay at 90% or higher.
+Coverage must stay at 90% or higher. Tests run twice: against the minimum
+supported Home Assistant version (pinned in `requirements-dev.txt`) and
+against the newest version the test harness supports, which includes betas
+when the harness publishes them.
 
 Tests exercise the config flow, panel registration, static files, sensors, the
 websocket API and live subscription, unload and reload, log parsing for real

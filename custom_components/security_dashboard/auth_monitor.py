@@ -23,7 +23,16 @@ from homeassistant.util import dt as dt_util
 
 from .const import AUTH_EVENT_BUFFER, BAN_LOGGER, SIGNAL_UPDATED, STALE_TOKEN_DAYS
 
-_IP_RE = re.compile(r"from ([0-9a-fA-F:.]+)")
+# HA logs either:
+#   "Login attempt or request with invalid authentication from <host> (<ip>). Requested URL: '...'. (<user agent>)"
+#   "Banned IP <ip> for too many login attempts"
+# <host> is a reverse-DNS name when one resolves, so take the IP from the parentheses.
+_LOGGER = logging.getLogger(__name__)
+
+_FAILED_IP_RE = re.compile(r"invalid authentication from \S+ \(([0-9a-fA-F:.]+)\)")
+_BANNED_IP_RE = re.compile(r"Banned IP ([0-9a-fA-F:.]+)")
+# Keep the line up to the requested URL; the trailing "(<user agent>)" is unsanitized client input
+_UP_TO_URL_RE = re.compile(r"^.*?Requested URL: '[^']*'\.")
 
 
 @dataclass(slots=True)
@@ -45,15 +54,19 @@ class _BanLogHandler(logging.Handler):
         self._monitor = monitor
 
     def emit(self, record: logging.LogRecord) -> None:
-        msg = record.getMessage()
-        match = _IP_RE.search(msg)
-        kind = "banned" if "Banned IP" in msg else "failed_login"
+        msg = record.getMessage().splitlines()[0]
+        if match := _BANNED_IP_RE.search(msg):
+            kind = "banned"
+        elif match := _FAILED_IP_RE.search(msg):
+            kind = "failed_login"
+        else:
+            return  # some other warning from this logger
         event = AuthEvent(
             timestamp=dt_util.utcnow().isoformat(),
             kind=kind,
-            ip=match.group(1) if match else None,
+            ip=match.group(1),
             user=None,
-            detail=msg.splitlines()[0][:300],
+            detail=(m.group(0) if (m := _UP_TO_URL_RE.match(msg)) else msg)[:300],
         )
         # Log records may come from any thread: hop back onto the event loop
         self._monitor.hass.loop.call_soon_threadsafe(self._monitor.add_event, event)
@@ -69,7 +82,13 @@ class AuthMonitor:
         self._seen_token_use: dict[str, str] = {}
 
     async def async_start(self) -> None:
-        logging.getLogger(BAN_LOGGER).addHandler(self._handler)
+        ban_logger = logging.getLogger(BAN_LOGGER)
+        # With e.g. `logger: default: error` the failed-login warnings are dropped
+        # before any handler runs. Lower just this logger so we still see them.
+        if ban_logger.getEffectiveLevel() > logging.WARNING:
+            ban_logger.setLevel(logging.WARNING)
+            _LOGGER.info("Set %s to WARNING so failed logins can be recorded", BAN_LOGGER)
+        ban_logger.addHandler(self._handler)
         # Seed "last used" so we only log *new* token usage from here on
         for token in await self._all_tokens():
             if token["last_used_at"]:

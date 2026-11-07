@@ -42,7 +42,9 @@ custom_components/security_dashboard/
   version and test against betas.
 - Failed logins are captured by attaching a handler to the
   `homeassistant.components.http.ban` logger. If that log message changes, the
-  parser needs updating.
+  parser needs updating. If your `logger:` config sets a level above WARNING,
+  the integration lowers that one logger to WARNING, so failed logins also
+  appear in the HA log.
 - Connection visibility depends on the install type. On HA OS you see host-wide
   sockets but cannot attribute add-on traffic. Short-lived connections between
   polls are missed. For full coverage, add a companion add-on (conntrack) or

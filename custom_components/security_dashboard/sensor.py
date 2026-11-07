@@ -4,13 +4,23 @@ from __future__ import annotations
 
 from homeassistant.components.sensor import SensorEntity, SensorStateClass
 from homeassistant.core import HomeAssistant, callback
+from homeassistant.helpers.device_registry import DeviceEntryType, DeviceInfo
 from homeassistant.helpers.dispatcher import async_dispatcher_connect
 from homeassistant.helpers.entity_platform import AddConfigEntryEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
 from . import SecurityConfigEntry
-from .const import SIGNAL_UPDATED
+from .const import DOMAIN, SIGNAL_UPDATED
 from .coordinator import NetworkCoordinator
+
+
+def _device(entry_id: str) -> DeviceInfo:
+    """One service device, so entity IDs become sensor.security_dashboard_*."""
+    return DeviceInfo(
+        identifiers={(DOMAIN, entry_id)},
+        name="Security Dashboard",
+        entry_type=DeviceEntryType.SERVICE,
+    )
 
 
 async def async_setup_entry(
@@ -36,6 +46,7 @@ class OutboundConnectionsSensor(CoordinatorEntity[NetworkCoordinator], SensorEnt
     def __init__(self, coordinator: NetworkCoordinator, entry_id: str) -> None:
         super().__init__(coordinator)
         self._attr_unique_id = f"{entry_id}_outbound_connections"
+        self._attr_device_info = _device(entry_id)
 
     @property
     def native_value(self) -> int | None:
@@ -58,6 +69,7 @@ class FailedLoginsSensor(SensorEntity):
     def __init__(self, entry: SecurityConfigEntry) -> None:
         self._entry = entry
         self._attr_unique_id = f"{entry.entry_id}_failed_logins_24h"
+        self._attr_device_info = _device(entry.entry_id)
         self._attr_native_value = 0
 
     async def async_added_to_hass(self) -> None:

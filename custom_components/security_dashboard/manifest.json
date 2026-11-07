@@ -1,6 +1,10 @@
 {
   "domain": "security_dashboard",
   "name": "Security Dashboard",
+  "categories": [
+    "security_safety",
+    "computers_network.monitoring"
+  ],
   "codeowners": [
     "@schadom"
   ],

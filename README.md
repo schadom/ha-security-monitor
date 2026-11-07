@@ -98,12 +98,22 @@ to internet addresses. LAN and loopback addresses are ignored. On its own, a
 socket scan only shows an IP address and a reverse-DNS name, which for cloud
 services is usually a hosting provider such as `ec2-…amazonaws.com`.
 
-**Which integration talks to which host.** The integration also traces Home
-Assistant's HTTP client (aiohttp). For each request it records the hostname,
-the integration that made the request and the IP address the connection went
-to. That lets the panel show `openapi.tuyaeu.com` and **Tuya** instead of an
-Amazon hostname. Requests made by a library on its own are assigned to the
-integration that requires that library.
+**Which integration talks to which host.** The integration registers a
+Python audit hook, a documented Python feature that reports every outgoing
+connection and DNS lookup in Home Assistant Core, whichever library makes it:
+aiohttp, httpx, `requests`, MQTT, websockets or raw sockets, in the event loop
+or in executor threads. Each connection is assigned to an integration by:
+
+1. the integration's code on the call stack,
+2. otherwise Home Assistant's config entry context, which background tasks
+   inherit from the integration that started them,
+3. otherwise a library on the call stack, mapped to the integration that
+   requires that library.
+
+Hostnames come from Home Assistant's HTTP client, which the integration also
+traces, so the panel shows `openapi.tuyaeu.com` and **Tuya** instead of an
+Amazon hostname. For other libraries, hostnames come from their DNS lookups,
+with reverse DNS as the last resort.
 
 **New destinations.** Hosts first seen during the first hour of monitoring are
 the baseline. Hosts that appear later are marked **New** for 24 hours.
@@ -174,24 +184,29 @@ Coverage must stay at 90% or higher.
 
 Tests exercise the config flow, panel registration, static files, sensors, the
 websocket API and live subscription, unload and reload, log parsing for real
-Home Assistant log formats, the 24-hour destination history, HTTP tracing and
-attribution against a local server, and persistence across a reload.
+Home Assistant log formats, the 24-hour destination history, attribution of
+aiohttp, plain-socket, asyncio and background-task connections against a local
+server, hostname lookup, and persistence across a reload.
 
 ## Known limitations
 
 - **Private APIs.** The integration relies on parts of Home Assistant and
   aiohttp that are not public API: the auth system, the ban logger's message
-  format, `ClientSession._request` and `TCPConnector._create_direct_connection`.
-  A Home Assistant or aiohttp update can break these. Test against beta
-  releases before updating production systems.
-- **Only aiohttp traffic is attributed.** Connections from libraries that use
-  `requests`, MQTT, raw sockets, add-ons and the host system show as
-  **Unattributed**.
+  format, the config entry context, `ClientSession._request` and
+  `TCPConnector._create_direct_connection`. A Home Assistant or aiohttp update
+  can break these. Attribution itself uses Python's public audit hook API; if
+  the aiohttp internals change, only exact hostnames for HTTP requests are lost.
+  Test against beta releases before updating production systems.
+- **Add-ons and the host system** run outside Home Assistant Core, so their
+  connections show as **Unattributed**.
 - **Connections opened before the integration starts** stay unattributed until
   they reconnect. Integrations that open a long-lived connection during startup
   are labelled after the next reconnect or restart.
-- **Short-lived connections between scans** are missed by the socket scan.
-  aiohttp requests are still counted by the tracing.
+- **Executor threads** don't inherit the config entry context. Connections made
+  there are attributed only when the integration's code or a known library is
+  on the call stack.
+- **Hostnames for non-HTTP traffic** come from re-resolving recent DNS lookups.
+  Services that rotate IPs quickly may fall back to reverse DNS.
 - **Visibility depends on the installation type.** On Home Assistant OS the
   scan sees the whole host network but cannot attribute add-on traffic. In
   Container installations it sees only the container's network.

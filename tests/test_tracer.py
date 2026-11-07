@@ -134,10 +134,10 @@ async def test_imports_history_from_security_dashboard(hass: HomeAssistant, hass
 
 async def test_tracer_unhooks_without_removing_later_wrappers(hass: HomeAssistant):
     """If something wrapped aiohttp after us, stop() must not remove it."""
-    from custom_components.security_monitor.http_tracer import HttpTracer
+    from custom_components.security_monitor.connection_tracer import ConnectionTracer
 
     original = aiohttp.ClientSession._request
-    tracer = HttpTracer(hass)
+    tracer = ConnectionTracer(hass)
     tracer.start()
     ours = aiohttp.ClientSession._request
 
@@ -153,7 +153,7 @@ async def test_tracer_unhooks_without_removing_later_wrappers(hass: HomeAssistan
         aiohttp.ClientSession._request = original
 
     # Normal case: nothing on top → original methods are restored
-    tracer2 = HttpTracer(hass)
+    tracer2 = ConnectionTracer(hass)
     tracer2.start()
     tracer2.stop()
     assert aiohttp.ClientSession._request is original

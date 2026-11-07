@@ -85,6 +85,27 @@ const ICON_PREV = chevron("M15 18l-6-6 6-6");
 const ICON_NEXT = chevron("M9 18l6-6-6-6");
 const ICON_LAST = chevron("M7 18l6-6-6-6M17 6v12");
 
+// Default sort per table. "now" keeps the order the scan returns; tokens show
+// the longest-unused first, so stale ones are on top.
+const SORT_DEFAULTS = {
+  access: { key: "when", dir: "desc" },
+  now: { key: null, dir: "asc" },
+  "24h": { key: "activity", dir: "desc" },
+  tokens: { key: "last_used", dir: "asc" },
+};
+const sortIcon = (d) => `<svg class="sort-icon" aria-hidden="true" viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="${d}"></path></svg>`;
+const ICON_SORT_ASC = sortIcon("M12 19V5M6 11l6-6 6 6");
+const ICON_SORT_DESC = sortIcon("M12 5v14M6 13l6 6 6-6");
+const ICON_SORT_NONE = sortIcon("M8 9l4-4 4 4M8 15l4 4 4-4");
+
+// Sort key for an IP: IPv4 numerically, IPv6 after IPv4
+const ipSortKey = (ip) => {
+  if (!ip) return null;
+  const v4 = /^(\d+)\.(\d+)\.(\d+)\.(\d+)$/.exec(ip);
+  return v4 ? v4.slice(1).map((n) => n.padStart(3, "0")).join(".") : `~${ip.toLowerCase()}`;
+};
+const timeSortKey = (iso) => (iso ? new Date(iso).getTime() : null);
+
 const KIND_LABEL = { failed_login: "Failed login", banned: "IP banned", token_used: "Token used" };
 
 class SecurityMonitorPanel extends HTMLElement {
@@ -95,6 +116,7 @@ class SecurityMonitorPanel extends HTMLElement {
     this._tab = "access";
     this._netView = "now";
     this._pages = { access: 0, now: 0, "24h": 0, tokens: 0 };
+    this._sort = JSON.parse(JSON.stringify(SORT_DEFAULTS));
     this._pageSize = DEFAULT_PAGE_SIZE;
     try {
       const saved = parseInt(localStorage.getItem(PAGE_SIZE_KEY), 10);
@@ -274,6 +296,74 @@ class SecurityMonitorPanel extends HTMLElement {
       </div>`;
   }
 
+  // Columns per table: key, label, type (time/number sort descending first,
+  // text/ip ascending) and how to get the sort value from a row.
+  _columns(table) {
+    const cols = {
+      access: [
+        { key: "when", label: "When", type: "time", get: (e) => timeSortKey(e.timestamp) },
+        { key: "event", label: "Event", type: "text", get: (e) => KIND_LABEL[e.kind] || e.kind },
+        { key: "ip", label: "Source IP", type: "ip", get: (e) => ipSortKey(e.ip) },
+        { key: "user", label: "User", type: "text", get: (e) => e.user },
+        { key: "detail", label: "Detail", type: "text", get: (e) => prettyDetail(e) },
+      ],
+      now: [
+        { key: "destination", label: "Destination", type: "text", get: (c) => c.traced_host || c.hostname },
+        { key: "remote", label: "Remote", type: "ip", get: (c) => ipSortKey(c.remote_ip) },
+        { key: "integration", label: "Integration", type: "text", get: (c) => (c.integration ? this._integrationName(c.integration) : null) },
+        { key: "seen", label: "Seen", type: "number", get: (c) => (this._newHosts.has(c.traced_host || c.hostname || c.remote_ip) ? 1 : 0) },
+      ],
+      "24h": [
+        { key: "destination", label: "Destination", type: "text", get: (x) => x.host },
+        { key: "integration", label: "Integration", type: "text", get: (x) => (x.integrations.length ? this._integrationName(x.integrations[0]) : null) },
+        { key: "activity", label: "Activity · 24 h", type: "number", get: (x) => x.activity },
+        { key: "first_seen", label: "First seen", type: "time", get: (x) => timeSortKey(x.first_seen) },
+        { key: "last_seen", label: "Last seen", type: "time", get: (x) => timeSortKey(x.last_seen) },
+      ],
+      tokens: [
+        { key: "user", label: "User", type: "text", get: (t) => t.user },
+        { key: "client", label: "Client", type: "text", get: (t) => prettyClient(t.client_name, t.type === "long_lived_access_token" ? null : t.type) },
+        { key: "type", label: "Type", type: "text", get: (t) => (t.type === "long_lived_access_token" ? "Long-lived" : "Session") },
+        // Never used counts as the oldest, not as empty
+        { key: "last_used", label: "Last used", type: "time", get: (t) => timeSortKey(t.last_used_at) ?? 0 },
+        { key: "last_ip", label: "Last IP", type: "ip", get: (t) => ipSortKey(t.last_used_ip) },
+      ],
+    };
+    return cols[table];
+  }
+
+  // Stable sort; empty values always last, whatever the direction
+  _sorted(table, items) {
+    const { key, dir } = this._sort[table];
+    const col = key && this._columns(table).find((c) => c.key === key);
+    if (!col) return items;
+    const sign = dir === "asc" ? 1 : -1;
+    return items
+      .map((item, index) => ({ item, index, value: col.get(item) }))
+      .sort((a, b) => {
+        const av = a.value, bv = b.value;
+        const aEmpty = av === null || av === undefined || av === "";
+        const bEmpty = bv === null || bv === undefined || bv === "";
+        if (aEmpty || bEmpty) return aEmpty === bEmpty ? a.index - b.index : aEmpty ? 1 : -1;
+        const cmp = typeof av === "number" && typeof bv === "number"
+          ? av - bv
+          : String(av).localeCompare(String(bv), undefined, { numeric: true, sensitivity: "base" });
+        return cmp ? cmp * sign : a.index - b.index;
+      })
+      .map((x) => x.item);
+  }
+
+  _thead(table, extra = "") {
+    const { key, dir } = this._sort[table];
+    const ths = this._columns(table).map((c) => {
+      const active = c.key === key;
+      const ariaSort = active ? (dir === "asc" ? "ascending" : "descending") : "none";
+      const icon = active ? (dir === "asc" ? ICON_SORT_ASC : ICON_SORT_DESC) : ICON_SORT_NONE;
+      return `<th aria-sort="${ariaSort}"><button type="button" class="sort ${active ? "active" : ""}" data-sort-table="${table}" data-sort-key="${c.key}">${c.label}${icon}</button></th>`;
+    }).join("");
+    return `<thead><tr>${ths}${extra}</tr></thead>`;
+  }
+
   // Slice `items` for the table `key` and build its pager. The page is clamped,
   // so a list that shrinks (live updates) never leaves you on an empty page.
   _paginate(key, items, label) {
@@ -309,7 +399,7 @@ class SecurityMonitorPanel extends HTMLElement {
   }
 
   _accessTable(d) {
-    const { slice, pager } = this._paginate("access", d.auth.events, "Access log");
+    const { slice, pager } = this._paginate("access", this._sorted("access", d.auth.events), "Access log");
     const rows = slice.map((e) => `
       <tr>
         <td class="muted"><span data-ago="${esc(e.timestamp)}">${ago(e.timestamp)}</span></td>
@@ -319,7 +409,7 @@ class SecurityMonitorPanel extends HTMLElement {
         <td class="detail" title="${esc(e.detail)}">${esc(prettyDetail(e))}</td>
       </tr>`).join("");
     return `<table>
-      <thead><tr><th>When</th><th>Event</th><th>Source IP</th><th>User</th><th>Detail</th></tr></thead>
+      ${this._thead("access")}
       <tbody>${rows || `<tr><td colspan="5" class="empty">No access events recorded yet.</td></tr>`}</tbody>
     </table>${pager}`;
   }
@@ -345,7 +435,8 @@ class SecurityMonitorPanel extends HTMLElement {
 
   _networkNow(net) {
     const isNew = new Set(net.destinations_24h.filter((x) => x.new).map((x) => x.host));
-    const { slice, pager } = this._paginate("now", net.connections, "Open connections");
+    this._newHosts = isNew;
+    const { slice, pager } = this._paginate("now", this._sorted("now", net.connections), "Open connections");
     const rows = slice.map((c) => {
       const host = c.traced_host || c.hostname || c.remote_ip;
       const rdns = c.traced_host && c.hostname && c.hostname !== c.traced_host
@@ -359,14 +450,14 @@ class SecurityMonitorPanel extends HTMLElement {
       </tr>`;
     }).join("");
     return `<table>
-      <thead><tr><th>Destination</th><th>Remote</th><th>Integration</th><th>Seen</th></tr></thead>
+      ${this._thead("now")}
       <tbody>${rows || `<tr><td colspan="4" class="empty">No external connections right now.</td></tr>`}</tbody>
     </table>${pager}
     <div class="foot">${plural(net.connections.length, "established connection", "established connections")} · ${plural(net.listening.length, "listening socket", "listening sockets")}</div>`;
   }
 
   _network24h(net) {
-    const { slice, pager } = this._paginate("24h", net.destinations_24h, "Destinations");
+    const { slice, pager } = this._paginate("24h", this._sorted("24h", net.destinations_24h), "Destinations");
     const rows = slice.map((x) => {
       const activity = [
         x.requests ? plural(x.requests, "request", "requests") : null,
@@ -385,14 +476,14 @@ class SecurityMonitorPanel extends HTMLElement {
       </tr>`;
     }).join("");
     return `<table>
-      <thead><tr><th>Destination</th><th>Integration</th><th>Activity · 24 h</th><th>First seen</th><th>Last seen</th></tr></thead>
+      ${this._thead("24h")}
       <tbody>${rows || `<tr><td colspan="5" class="empty">No outbound traffic recorded in the last 24 h.</td></tr>`}</tbody>
     </table>${pager}
     <div class="foot">Requests are counted by tracing Home Assistant's HTTP client. Connections come from the socket scan. Monitoring since ${fmtDateTime(net.monitoring_since)}.</div>`;
   }
 
   _tokensTable(d) {
-    const { slice, pager } = this._paginate("tokens", d.auth.tokens, "Tokens");
+    const { slice, pager } = this._paginate("tokens", this._sorted("tokens", d.auth.tokens), "Tokens");
     const rows = slice.map((t) => `
       <tr>
         <td>${esc(t.user)}</td>
@@ -403,7 +494,7 @@ class SecurityMonitorPanel extends HTMLElement {
         <td>${t.stale ? `<span class="chip new">Stale · revoke?</span>` : ""}</td>
       </tr>`).join("");
     return `<table>
-      <thead><tr><th>User</th><th>Client</th><th>Type</th><th>Last used</th><th>Last IP</th><th><span class="sr">Status</span></th></tr></thead>
+      ${this._thead("tokens", `<th><span class="sr">Status</span></th>`)}
       <tbody>${rows || `<tr><td colspan="6" class="empty">No tokens.</td></tr>`}</tbody>
     </table>${pager}`;
   }
@@ -558,6 +649,13 @@ class SecurityMonitorPanel extends HTMLElement {
           background:none; color:var(--primary-text-color); cursor:pointer; }
         button.pg:hover:not([disabled]) { background:var(--secondary-background-color); }
         button.pg[disabled] { color:var(--disabled-text-color, var(--divider-color)); cursor:default; }
+        button.sort { display:inline-flex; align-items:center; gap:4px; padding:0; margin:0; border:0; background:none;
+          color:inherit; font:inherit; text-transform:inherit; letter-spacing:inherit; cursor:pointer; white-space:nowrap; }
+        button.sort .sort-icon { opacity:.35; transition:opacity .15s; }
+        button.sort:hover, button.sort.active { color:var(--primary-text-color); }
+        button.sort:hover .sort-icon { opacity:.8; }
+        button.sort.active .sort-icon { opacity:1; color:var(--primary-color); }
+        button.sort:focus-visible { outline:2px solid var(--primary-color); outline-offset:2px; border-radius:3px; }
         .empty { padding:20px; text-align:center; color:var(--secondary-text-color); }
         .segbar { padding:12px 16px 4px; }
         .segs { display:inline-flex; border:1px solid var(--divider-color); border-radius:18px; overflow:hidden; }
@@ -580,6 +678,20 @@ class SecurityMonitorPanel extends HTMLElement {
     this.shadowRoot.querySelectorAll(".tabs button").forEach((b) =>
       b.addEventListener("click", () => {
         this._tab = b.dataset.tab;
+        this._render();
+      }));
+    this.shadowRoot.querySelectorAll("button[data-sort-table]").forEach((b) =>
+      b.addEventListener("click", () => {
+        const table = b.dataset.sortTable;
+        const key = b.dataset.sortKey;
+        const current = this._sort[table];
+        if (current.key === key) {
+          current.dir = current.dir === "asc" ? "desc" : "asc";
+        } else {
+          const col = this._columns(table).find((c) => c.key === key);
+          this._sort[table] = { key, dir: col.type === "time" || col.type === "number" ? "desc" : "asc" };
+        }
+        this._pages[table] = 0;
         this._render();
       }));
     this.shadowRoot.querySelectorAll("button[data-pager]").forEach((b) =>

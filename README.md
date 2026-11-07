@@ -37,7 +37,7 @@ The **Connections** tab, **Last 24 h** view:
 
 ## Installation with HACS
 
-[![Open your Home Assistant instance and open a repository inside the Home Assistant Community Store.](https://my.home-assistant.io/badges/hacs_repository.svg)](https://my.home-assistant.io/redirect/hacs_repository/?owner=schadom&repository=hacs_security_monitor&category=integration)
+[![Open your Home Assistant instance and open a repository inside the Home Assistant Community Store.](https://my.home-assistant.io/badges/hacs_repository.svg)](https://my.home-assistant.io/redirect/hacs_repository/?owner=schadom&repository=ha-security-monitor&category=integration)
 
 1. Add this repository as a custom repository of category **Integration**.
 2. Install **Security Monitor** and restart Home Assistant.
@@ -234,13 +234,13 @@ server, hostname lookup, and persistence across a reload.
       custom_components.security_monitor: debug
   ```
 
-[hacs_security_monitor]: https://github.com/schadom/hacs_security_monitor
-[commits-shield]: https://img.shields.io/github/commit-activity/y/schadom/hacs_security_monitor.svg?style=for-the-badge
-[commits]: https://github.com/schadom/hacs_security_monitor/commits/main
+[ha-security-monitor]: https://github.com/schadom/ha-security-monitor
+[commits-shield]: https://img.shields.io/github/commit-activity/y/schadom/ha-security-monitor.svg?style=for-the-badge
+[commits]: https://github.com/schadom/ha-security-monitor/commits/main
 [hacs]: https://github.com/hacs/integration
 [hacsbadge]: https://img.shields.io/badge/HACS-Custom-41BDF5.svg?style=for-the-badge
-[license-shield]: https://img.shields.io/github/license/schadom/hacs_security_monitor.svg?style=for-the-badge
-[demo]: https://raw.githubusercontent.com/schadom/hacs_security_monitor/refs/heads/main/demo.png
-[connections]: https://raw.githubusercontent.com/schadom/hacs_security_monitor/refs/heads/main/connections.png
-[releases-shield]: https://img.shields.io/github/release/schadom/hacs_security_monitor.svg?style=for-the-badge
-[releases]: https://github.com/schadom/hacs_security_monitor/releases
+[license-shield]: https://img.shields.io/github/license/schadom/ha-security-monitor.svg?style=for-the-badge
+[demo]: https://raw.githubusercontent.com/schadom/ha-security-monitor/refs/heads/main/demo.png
+[connections]: https://raw.githubusercontent.com/schadom/ha-security-monitor/refs/heads/main/connections.png
+[releases-shield]: https://img.shields.io/github/release/schadom/ha-security-monitor.svg?style=for-the-badge
+[releases]: https://github.com/schadom/ha-security-monitor/releases

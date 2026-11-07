@@ -1,0 +1,33 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Security Monitor",
+        "description": "Fügt der Seitenleiste ein Security-Monitor-Panel hinzu (nur für Administratoren), das Zugriffsprotokolle, die Token-Hygiene und ausgehende Verbindungen anzeigt."
+      }
+    },
+    "abort": {
+      "single_instance_allowed": "Security Monitor ist bereits eingerichtet."
+    }
+  },
+  "entity": {
+    "sensor": {
+      "outbound_connections": { "name": "Ausgehende Verbindungen" },
+      "failed_logins_24h": { "name": "Fehlgeschlagene Anmeldungen (24 h)" }
+    }
+  },
+  "issues": {
+    "ip_ban_disabled": {
+      "title": "IP-Sperre ist deaktiviert",
+      "description": "Wiederholte fehlgeschlagene Anmeldungen werden nie blockiert. Füge `ip_ban_enabled: true` und `login_attempts_threshold` zum Abschnitt `http:` in der configuration.yaml hinzu."
+    },
+    "external_http": {
+      "title": "Fernzugriff ohne HTTPS",
+      "description": "Deine externe URL verwendet einfaches HTTP, daher werden Passwörter und Token unverschlüsselt übertragen. Verwende Home Assistant Cloud, einen Reverse-Proxy mit TLS oder konfiguriere `ssl_certificate`."
+    },
+    "stale_tokens": {
+      "title": "Ungenutzte langlebige Zugriffstoken",
+      "description": "Einige langlebige Zugriffstoken wurden seit 90 Tagen nicht verwendet. Widerrufe die nicht mehr benötigten unter Profil → Sicherheit."
+    }
+  }
+}

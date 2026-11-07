@@ -151,6 +151,10 @@ python3.13 -m venv .venv
 docker compose config --quiet
 ```
 
+The **Validate** workflow runs these checks on every push and pull request,
+weekly, and on demand, together with the HACS and hassfest validations.
+Coverage must stay at 90% or higher.
+
 Tests exercise the config flow, panel registration, static files, sensors, the
 websocket API and live subscription, unload and reload, log parsing for real
 Home Assistant log formats, the 24-hour destination history, HTTP tracing and

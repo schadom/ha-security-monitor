@@ -1,7 +1,7 @@
 homeassistant:
   name: Security Monitor Test
   unit_system: metric
-  time_zone: Europe/Vienna
+  time_zone: UTC
 
 default_config:
 

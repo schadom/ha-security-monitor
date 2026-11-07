@@ -32,7 +32,7 @@ const APP_CLIENTS = {
 };
 
 // Human label for a token's client.
-//   http://homeassistant.lan:8123/ + session → "Browser session · homeassistant.lan"
+//   http://homeassistant.local:8123/ + session → "Browser session · homeassistant.local"
 //   https://home-assistant.io/iOS            → "Home Assistant iOS app"
 //   Node-RED + long-lived                    → "Node-RED · long-lived token"
 const prettyClient = (client, type) => {

@@ -6,7 +6,7 @@ services:
     ports:
       - "127.0.0.1:${HA_PORT:-8123}:8123"
     environment:
-      TZ: ${TZ:-Europe/Vienna}
+      TZ: ${TZ:-UTC}
     volumes:
       - ha-config:/config
       - ./dev/configuration.yaml:/config/configuration.yaml:ro

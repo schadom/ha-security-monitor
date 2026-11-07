@@ -211,5 +211,5 @@ class AuthMonitor:
             "top_source_24h": {"ip": top[0][0], "count": top[0][1]} if top else None,
             "failed_hourly": hourly,
             "failed_hourly_start": hourly_start.isoformat(),
-            "events": [asdict(e) for e in list(self.events)[:200]],
+            "events": [asdict(e) for e in self.events],
         }

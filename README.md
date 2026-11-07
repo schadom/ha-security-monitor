@@ -1,93 +1,210 @@
-# Security Dashboard for Home Assistant
+# Security Dashboard integration
 
-A HACS integration that adds an admin-only **Security** panel to the sidebar:
+[![GitHub Release][releases-shield]][releases]
+[![GitHub Activity][commits-shield]][commits]
+[![License][license-shield]](LICENSE)
+[![hacs][hacsbadge]][hacs]
 
-- **Access log**: failed logins, IP bans and token usage (who, from which IP, when)
-- **Tokens**: every refresh / long-lived token, last use, stale-token detection
-- **Connections**: what's open now, plus a "last 24 h" view with first/last seen
-  dates. Each destination shows the integration that talks to it.
-- **History**: the access log and destination history persist across restarts
-- **Findings + score**: MFA coverage, IP banning, HTTPS on the external URL, custom integrations
-- **Repairs**: important findings also appear under Settings → Repairs
-- **Sensors**: `sensor.security_dashboard_failed_logins_24h` and `sensor.security_dashboard_outbound_connections` for automations
+> [!IMPORTANT]
+> This integration is not affiliated with the Home Assistant project or Nabu Casa and is provided as-is and without warranty. It helps you spot problems; it does not make your installation secure on its own.
 
-## Layout
+Adds an admin-only **Security** panel to the Home Assistant sidebar. It shows who
+accessed your instance, which tokens are in use, which internet hosts Home
+Assistant talks to and which integration is behind each connection, together
+with a security score and concrete findings.
 
+## What it shows
+
+| Area | Source | Details |
+| --- | --- | --- |
+| Access log | HA's login and ban handling | Failed logins, IP bans and token use, with source IP and user |
+| Failed logins chart | Access log | Failed logins per hour for the last 24 hours, peak hour and top source IP |
+| Tokens | HA's auth system | Every session and long-lived token, last use and last IP; long-lived tokens unused for 90 days are marked stale |
+| Connections | Socket scan + HTTP tracing | Open connections to internet hosts and a 24-hour history with first and last seen, labelled with the integration that made them |
+| Findings | Configuration checks | Users without MFA, stale tokens, IP banning disabled, plain-HTTP external URL, failed-login bursts, custom integrations |
+| Repairs | Findings | Important findings also appear in **Settings > Repairs** |
+
+The access log and the connection history are stored on disk, so they survive
+restarts.
+
+## Screenshot
+
+![demo]
+
+The **Connections** tab, **Last 24 h** view:
+
+![connections]
+
+## Installation with HACS
+
+[![Open your Home Assistant instance and open a repository inside the Home Assistant Community Store.](https://my.home-assistant.io/badges/hacs_repository.svg)](https://my.home-assistant.io/redirect/hacs_repository/?owner=schadom&repository=hacs_security_dashboard&category=integration)
+
+1. Add this repository as a custom repository of category **Integration**.
+2. Install **Security Dashboard** and restart Home Assistant.
+3. In **Settings > Devices & services > Add integration**, add **Security Dashboard**.
+   There is nothing to configure.
+4. Open **Security** in the sidebar. The panel is only visible to administrators.
+
+To install manually, copy `custom_components/security_dashboard` into the
+`custom_components` folder of your Home Assistant configuration and restart.
+
+Requires Home Assistant **2026.2.0** or newer.
+
+### Entities
+
+The integration adds a **Security Dashboard** service device with two sensors
+for use in automations:
+
+- `sensor.security_dashboard_failed_logins_24h`: failed logins in the last 24 hours
+- `sensor.security_dashboard_outbound_connections`: connections to internet hosts
+  open right now. The attribute `top_destinations` lists the busiest hosts.
+
+## Removal
+
+1. In **Settings > Devices & services**, open **Security Dashboard**, open the
+   entry's menu and choose **Delete**. This removes the panel, the sensors and the
+   stored history.
+2. To remove the integration completely, uninstall **Security Dashboard** in HACS
+   (or delete `custom_components/security_dashboard`) and restart Home Assistant.
+
+## How it works
+
+**Access log.** Home Assistant logs every failed login and IP ban as a warning.
+The integration reads those log records and records the source IP. Token use
+comes from the `last_used_at` and `last_used_ip` fields of each token. If your
+`logger:` configuration hides warnings, the integration sets only the
+`homeassistant.components.http.ban` logger back to warning, so failed logins
+also appear in your Home Assistant log.
+
+**Connections.** Every 30 seconds the integration lists established connections
+to internet addresses. LAN and loopback addresses are ignored. On its own, a
+socket scan only shows an IP address and a reverse-DNS name, which for cloud
+services is usually a hosting provider such as `ec2-…amazonaws.com`.
+
+**Which integration talks to which host.** The integration also traces Home
+Assistant's HTTP client (aiohttp). For each request it records the hostname,
+the integration that made the request and the IP address the connection went
+to. That lets the panel show `openapi.tuyaeu.com` and **Tuya** instead of an
+Amazon hostname. Requests made by a library on its own are assigned to the
+integration that requires that library.
+
+**New destinations.** Hosts first seen during the first hour of monitoring are
+the baseline. Hosts that appear later are marked **New** for 24 hours.
+
+**Storage.** History is kept in `.storage/security_dashboard.history`. It is
+saved every 5 minutes and when Home Assistant stops, and deleted when you
+remove the integration.
+
+**Privacy.** Everything stays on your Home Assistant instance. Only hostnames,
+IP addresses, integration names, counts and timestamps are stored, never URLs,
+paths, query strings, headers or request bodies.
+
+## Local Docker testing
+
+Install and start Docker Desktop on macOS, or Docker Engine with Compose on Linux.
+From this repository, start the pinned Home Assistant **2026.10.3** image:
+
+```sh
+docker compose up -d
 ```
-custom_components/security_dashboard/
-├── __init__.py          # setup, static path + sidebar panel registration
-├── manifest.json
-├── const.py
-├── config_flow.py       # single-instance, zero-config
-├── auth_monitor.py      # ban-logger handler + hass.auth token/MFA snapshot
-├── coordinator.py       # psutil connection scan every 30 s + rolling 24 h view
-├── http_tracer.py       # attributes outbound HTTP traffic to integrations
-├── storage.py           # persists access log + destination history
-├── checks.py            # hygiene findings + score
-├── repairs.py           # mirrors findings into the Repairs UI
-├── websocket_api.py     # security_dashboard/overview and /subscribe (admin only)
-├── sensor.py
-├── strings.json / translations/en.json
-└── frontend/
-    └── security-dashboard-panel.js   # the bundled dashboard (no build step)
+
+Open <http://localhost:8123>, complete Home Assistant onboarding, then add
+**Security Dashboard**. The test configuration enables IP banning after five
+failed attempts and debug logging for the integration.
+
+To produce access-log entries, log out and sign in with a wrong password a few
+times, or call the API with an invalid token:
+
+```sh
+curl -s -H "Authorization: Bearer invalid" http://localhost:8123/api/states
 ```
 
-## How the bundled dashboard works
+Inside the container, the socket scan only sees the container's own network.
+Integrations that reach the internet, such as **Met.no**, produce traced
+connections in the **Connections** tab.
 
-1. `async_setup` serves `frontend/` at `/security_dashboard_static/`.
-2. `async_setup_entry` calls `panel_custom.async_register_panel(...)` with
-   `require_admin=True`, pointing at the JS module. HA adds a sidebar item.
-3. The web component subscribes to `security_dashboard/subscribe` and re-renders
-   whenever the integration dispatches `SIGNAL_UPDATED` (new auth event or scan).
+The UI binds only to `127.0.0.1`. If port 8123 is occupied, use
+`HA_PORT=8124 docker compose up -d` and open port 8124. HA state is retained in a
+Docker volume; the integration source is mounted read-only from this checkout.
+No HACS installation is needed inside this test HA.
 
-## Which integration talks to which host
+```sh
+docker compose logs --tail=100 homeassistant
+docker compose restart homeassistant
+docker compose down
+```
 
-The integration wraps aiohttp's `ClientSession._request` and
-`TCPConnector._create_direct_connection` (both private aiohttp API) at class level, so
-every aiohttp session is covered. For each request it records:
+Restart Home Assistant after Python changes. Reload the browser after changes
+to the panel. `down` retains your test configuration; adding `--volumes`
+permanently deletes it.
 
-- the **hostname** (e.g. `openapi.tuyaeu.com` rather than an `ec2-…amazonaws.com`
-  reverse-DNS name),
-- the **calling integration**, found by walking the call stack to the first frame
-  under `homeassistant/components/<domain>/` or `custom_components/<domain>/`.
-  Requests from a library's own background task are mapped to the integration
-  that requires that library.
-- the **peer IP** of each new TCP connection, so the socket scan can label
-  long-lived connections too.
+## Development checks
 
-Only hostnames, IPs, integration names, counts and timestamps are kept, never
-URLs, paths, query strings, headers or bodies. LAN and loopback traffic is
-ignored. Traffic that doesn't use aiohttp (`requests` in executor threads, MQTT,
-raw sockets, add-ons, the host OS) still appears in the socket scan, as
-"unattributed".
+Use Python 3.13. The test dependencies pin Home Assistant to the version the
+tests were run against.
 
-## History and "new" destinations
+```sh
+python3.13 -m venv .venv
+.venv/bin/python -m pip install -r requirements-dev.txt
+.venv/bin/python -m pytest -q
+.venv/bin/python -m ruff check custom_components tests
+docker compose config --quiet
+```
 
-History is stored in `.storage/security_dashboard.history`. It is saved every
-5 minutes and on shutdown, and deleted when you remove the integration.
-Destinations first seen during the first hour of monitoring form the baseline.
-Only later ones are flagged as new.
+Tests exercise the config flow, panel registration, static files, sensors, the
+websocket API and live subscription, unload and reload, log parsing for real
+Home Assistant log formats, the 24-hour destination history, HTTP tracing and
+attribution against a local server, and persistence across a reload.
 
-## Known limits
+## Known limitations
 
-- `hass.auth` and the http ban internals are not public API. Pin a minimum HA
-  version and test against betas.
-- Failed logins are captured by attaching a handler to the
-  `homeassistant.components.http.ban` logger. If that log message changes, the
-  parser needs updating. If your `logger:` config sets a level above WARNING,
-  the integration lowers that one logger to WARNING, so failed logins also
-  appear in the HA log.
-- Connection visibility depends on the install type. On HA OS you see host-wide
-  sockets but cannot attribute add-on traffic. Short-lived connections between
-  polls are missed. For full coverage, add a companion add-on (conntrack) or
-  pull DNS logs from Pi-hole / AdGuard Home.
-- Reverse DNS lookups run in the executor and are cached. Slow resolvers can
-  delay a scan.
+- **Private APIs.** The integration relies on parts of Home Assistant and
+  aiohttp that are not public API: the auth system, the ban logger's message
+  format, `ClientSession._request` and `TCPConnector._create_direct_connection`.
+  A Home Assistant or aiohttp update can break these. Test against beta
+  releases before updating production systems.
+- **Only aiohttp traffic is attributed.** Connections from libraries that use
+  `requests`, MQTT, raw sockets, add-ons and the host system show as
+  **Unattributed**.
+- **Connections opened before the integration starts** stay unattributed until
+  they reconnect. Integrations that open a long-lived connection during startup
+  are labelled after the next reconnect or restart.
+- **Short-lived connections between scans** are missed by the socket scan.
+  aiohttp requests are still counted by the tracing.
+- **Visibility depends on the installation type.** On Home Assistant OS the
+  scan sees the whole host network but cannot attribute add-on traffic. In
+  Container installations it sees only the container's network.
+- **Reverse DNS lookups** run in the background and are cached. A slow DNS
+  server delays scans.
 
-## Ideas for next steps
+## Troubleshooting
 
-- GeoIP lookup (offline MaxMind DB) for access-log IPs
-- Options flow: scan interval, stale-token threshold, allowlist of known destinations
-- Alert on first-seen destinations or a new IP using a token
-- Companion add-on that streams conntrack events to the integration
-- Notify when an integration contacts a host for the first time
+- **The Security panel does not appear.** The panel is only shown to
+  administrators. Check that the integration is set up under **Settings >
+  Devices & services**.
+- **The panel shows an old version after an update.** Restart Home Assistant,
+  then reload the browser page.
+- **No failed logins are recorded.** Check that the `homeassistant.components.http.ban`
+  logger is not set to `error` or higher in an automation or in the
+  **logger.set_level** action; the integration only adjusts it at startup.
+- **Many connections are unattributed.** See [Known limitations](#known-limitations).
+  Restart Home Assistant once after installing so that long-lived connections are
+  traced from the start.
+- **Enable debug logging** to see what the integration records:
+
+  ```yaml
+  logger:
+    logs:
+      custom_components.security_dashboard: debug
+  ```
+
+[hacs_security_dashboard]: https://github.com/schadom/hacs_security_dashboard
+[commits-shield]: https://img.shields.io/github/commit-activity/y/schadom/hacs_security_dashboard.svg?style=for-the-badge
+[commits]: https://github.com/schadom/hacs_security_dashboard/commits/main
+[hacs]: https://github.com/hacs/integration
+[hacsbadge]: https://img.shields.io/badge/HACS-Custom-41BDF5.svg?style=for-the-badge
+[license-shield]: https://img.shields.io/github/license/schadom/hacs_security_dashboard.svg?style=for-the-badge
+[demo]: https://raw.githubusercontent.com/schadom/hacs_security_dashboard/refs/heads/main/demo.png
+[connections]: https://raw.githubusercontent.com/schadom/hacs_security_dashboard/refs/heads/main/connections.png
+[releases-shield]: https://img.shields.io/github/release/schadom/hacs_security_dashboard.svg?style=for-the-badge
+[releases]: https://github.com/schadom/hacs_security_dashboard/releases

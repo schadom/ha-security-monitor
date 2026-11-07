@@ -1,0 +1,15 @@
+homeassistant:
+  name: Security Dashboard Test
+  unit_system: metric
+  time_zone: Europe/Vienna
+
+default_config:
+
+http:
+  ip_ban_enabled: true
+  login_attempts_threshold: 5
+
+logger:
+  default: warning
+  logs:
+    custom_components.security_dashboard: debug

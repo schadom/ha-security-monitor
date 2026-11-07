@@ -18,7 +18,8 @@ const ago = (iso) => {
   if (s < 60) return `${s} s ago`;
   if (s < 3600) return `${Math.round(s / 60)} min ago`;
   if (s < 86400) return `${Math.round(s / 3600)} h ago`;
-  return `${Math.round(s / 86400)} days ago`;
+  const days = Math.round(s / 86400);
+  return `${days} ${days === 1 ? "day" : "days"} ago`;
 };
 
 const hourLabel = (date) => `${String(date.getHours()).padStart(2, "0")}:00`;
@@ -75,6 +76,15 @@ const fmtDateTime = (iso) => {
   return sameDay ? `Today ${time}` : `${d.toLocaleDateString([], { day: "numeric", month: "short" })} ${time}`;
 };
 
+const PAGE_SIZES = [10, 25, 50, 100];
+const DEFAULT_PAGE_SIZE = 10;
+const PAGE_SIZE_KEY = "security_monitor.page_size";
+const chevron = (d) => `<svg aria-hidden="true" viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="${d}"></path></svg>`;
+const ICON_FIRST = chevron("M17 18l-6-6 6-6M7 6v12");
+const ICON_PREV = chevron("M15 18l-6-6 6-6");
+const ICON_NEXT = chevron("M9 18l6-6-6-6");
+const ICON_LAST = chevron("M7 18l6-6-6-6M17 6v12");
+
 const KIND_LABEL = { failed_login: "Failed login", banned: "IP banned", token_used: "Token used" };
 
 class SecurityMonitorPanel extends HTMLElement {
@@ -84,6 +94,12 @@ class SecurityMonitorPanel extends HTMLElement {
     this._data = null;
     this._tab = "access";
     this._netView = "now";
+    this._pages = { access: 0, now: 0, "24h": 0, tokens: 0 };
+    this._pageSize = DEFAULT_PAGE_SIZE;
+    try {
+      const saved = parseInt(localStorage.getItem(PAGE_SIZE_KEY), 10);
+      if (PAGE_SIZES.includes(saved)) this._pageSize = saved;
+    } catch (_) { /* storage unavailable: use the default */ }
     this._running = false;
   }
 
@@ -258,8 +274,43 @@ class SecurityMonitorPanel extends HTMLElement {
       </div>`;
   }
 
+  // Slice `items` for the table `key` and build its pager. The page is clamped,
+  // so a list that shrinks (live updates) never leaves you on an empty page.
+  _paginate(key, items, label) {
+    const size = this._pageSize;
+    const total = items.length;
+    const pages = Math.max(1, Math.ceil(total / size));
+    const page = Math.min(this._pages[key] || 0, pages - 1);
+    this._pages[key] = page;
+    const start = page * size;
+    const slice = items.slice(start, start + size);
+    if (total <= PAGE_SIZES[0]) return { slice, pager: "" };
+
+    const btn = (to, icon, text, disabled) =>
+      `<button type="button" class="pg" data-pager="${key}" data-to="${to}" aria-label="${text}" title="${text}" ${disabled ? "disabled" : ""}>${icon}</button>`;
+    const sizes = PAGE_SIZES.map((n) => `<option value="${n}" ${n === size ? "selected" : ""}>${n}</option>`).join("");
+    return {
+      slice,
+      pager: `
+        <nav class="pager" aria-label="${label} pages">
+          <label class="pg-size">Rows per page
+            <select data-pagesize>${sizes}</select>
+          </label>
+          <span class="pg-range">${start + 1}–${Math.min(start + size, total)} of ${total}</span>
+          <span class="pg-buttons">
+            ${btn(0, ICON_FIRST, "First page", page === 0)}
+            ${btn(page - 1, ICON_PREV, "Previous page", page === 0)}
+            <span class="pg-page">Page ${page + 1} of ${pages}</span>
+            ${btn(page + 1, ICON_NEXT, "Next page", page >= pages - 1)}
+            ${btn(pages - 1, ICON_LAST, "Last page", page >= pages - 1)}
+          </span>
+        </nav>`,
+    };
+  }
+
   _accessTable(d) {
-    const rows = d.auth.events.map((e) => `
+    const { slice, pager } = this._paginate("access", d.auth.events, "Access log");
+    const rows = slice.map((e) => `
       <tr>
         <td class="muted"><span data-ago="${esc(e.timestamp)}">${ago(e.timestamp)}</span></td>
         <td><span class="chip ${e.kind}">${KIND_LABEL[e.kind] || esc(e.kind)}</span></td>
@@ -270,7 +321,7 @@ class SecurityMonitorPanel extends HTMLElement {
     return `<table>
       <thead><tr><th>When</th><th>Event</th><th>Source IP</th><th>User</th><th>Detail</th></tr></thead>
       <tbody>${rows || `<tr><td colspan="5" class="empty">No access events recorded yet.</td></tr>`}</tbody>
-    </table>`;
+    </table>${pager}`;
   }
 
   _networkTable(d) {
@@ -294,7 +345,8 @@ class SecurityMonitorPanel extends HTMLElement {
 
   _networkNow(net) {
     const isNew = new Set(net.destinations_24h.filter((x) => x.new).map((x) => x.host));
-    const rows = net.connections.map((c) => {
+    const { slice, pager } = this._paginate("now", net.connections, "Open connections");
+    const rows = slice.map((c) => {
       const host = c.traced_host || c.hostname || c.remote_ip;
       const rdns = c.traced_host && c.hostname && c.hostname !== c.traced_host
         ? `<div class="sub" title="Reverse DNS">${esc(c.hostname)}</div>` : "";
@@ -309,12 +361,13 @@ class SecurityMonitorPanel extends HTMLElement {
     return `<table>
       <thead><tr><th>Destination</th><th>Remote</th><th>Integration</th><th>Seen</th></tr></thead>
       <tbody>${rows || `<tr><td colspan="4" class="empty">No external connections right now.</td></tr>`}</tbody>
-    </table>
+    </table>${pager}
     <div class="foot">${plural(net.connections.length, "established connection", "established connections")} · ${plural(net.listening.length, "listening socket", "listening sockets")}</div>`;
   }
 
   _network24h(net) {
-    const rows = net.destinations_24h.map((x) => {
+    const { slice, pager } = this._paginate("24h", net.destinations_24h, "Destinations");
+    const rows = slice.map((x) => {
       const activity = [
         x.requests ? plural(x.requests, "request", "requests") : null,
         x.connections ? plural(x.connections, "connection", "connections") : null,
@@ -334,12 +387,13 @@ class SecurityMonitorPanel extends HTMLElement {
     return `<table>
       <thead><tr><th>Destination</th><th>Integration</th><th>Activity · 24 h</th><th>First seen</th><th>Last seen</th></tr></thead>
       <tbody>${rows || `<tr><td colspan="5" class="empty">No outbound traffic recorded in the last 24 h.</td></tr>`}</tbody>
-    </table>
+    </table>${pager}
     <div class="foot">Requests are counted by tracing Home Assistant's HTTP client. Connections come from the socket scan. Monitoring since ${fmtDateTime(net.monitoring_since)}.</div>`;
   }
 
   _tokensTable(d) {
-    const rows = d.auth.tokens.map((t) => `
+    const { slice, pager } = this._paginate("tokens", d.auth.tokens, "Tokens");
+    const rows = slice.map((t) => `
       <tr>
         <td>${esc(t.user)}</td>
         <td>${esc(prettyClient(t.client_name, t.type === "long_lived_access_token" ? null : t.type))}</td>
@@ -351,7 +405,7 @@ class SecurityMonitorPanel extends HTMLElement {
     return `<table>
       <thead><tr><th>User</th><th>Client</th><th>Type</th><th>Last used</th><th>Last IP</th><th><span class="sr">Status</span></th></tr></thead>
       <tbody>${rows || `<tr><td colspan="6" class="empty">No tokens.</td></tr>`}</tbody>
-    </table>`;
+    </table>${pager}`;
   }
 
   _findings(d) {
@@ -493,6 +547,17 @@ class SecurityMonitorPanel extends HTMLElement {
         .fill { height:6px; border-radius:3px; }
         .foot { font-size:12px; color:var(--secondary-text-color); padding:10px 16px 12px; }
         .side .foot { padding:12px 0 0; }
+        .pager { display:flex; flex-wrap:wrap; align-items:center; justify-content:flex-end; gap:8px 20px;
+          padding:8px 16px; border-top:1px solid var(--divider-color); font-size:13px; color:var(--secondary-text-color); }
+        .pg-size { display:inline-flex; align-items:center; gap:8px; }
+        .pg-size select { min-height:32px; padding:0 6px; border-radius:6px; border:1px solid var(--divider-color);
+          background:var(--card-background-color); color:var(--primary-text-color); font:inherit; }
+        .pg-buttons { display:inline-flex; align-items:center; gap:2px; }
+        .pg-page { padding:0 8px; white-space:nowrap; }
+        button.pg { width:36px; height:36px; display:inline-grid; place-items:center; border:0; border-radius:50%;
+          background:none; color:var(--primary-text-color); cursor:pointer; }
+        button.pg:hover:not([disabled]) { background:var(--secondary-background-color); }
+        button.pg[disabled] { color:var(--disabled-text-color, var(--divider-color)); cursor:default; }
         .empty { padding:20px; text-align:center; color:var(--secondary-text-color); }
         .segbar { padding:12px 16px 4px; }
         .segs { display:inline-flex; border:1px solid var(--divider-color); border-radius:18px; overflow:hidden; }
@@ -515,6 +580,18 @@ class SecurityMonitorPanel extends HTMLElement {
     this.shadowRoot.querySelectorAll(".tabs button").forEach((b) =>
       b.addEventListener("click", () => {
         this._tab = b.dataset.tab;
+        this._render();
+      }));
+    this.shadowRoot.querySelectorAll("button[data-pager]").forEach((b) =>
+      b.addEventListener("click", () => {
+        this._pages[b.dataset.pager] = Math.max(0, parseInt(b.dataset.to, 10) || 0);
+        this._render();
+      }));
+    this.shadowRoot.querySelectorAll("select[data-pagesize]").forEach((sel) =>
+      sel.addEventListener("change", () => {
+        this._pageSize = parseInt(sel.value, 10) || DEFAULT_PAGE_SIZE;
+        try { localStorage.setItem(PAGE_SIZE_KEY, String(this._pageSize)); } catch (_) { /* not persisted */ }
+        Object.keys(this._pages).forEach((k) => { this._pages[k] = 0; });
         this._render();
       }));
     this.shadowRoot.querySelectorAll("button[data-netview]").forEach((b) =>

@@ -86,12 +86,12 @@ const ICON_NEXT = chevron("M9 18l6-6-6-6");
 const ICON_LAST = chevron("M7 18l6-6-6-6M17 6v12");
 
 // Default sort per table. "now" keeps the order the scan returns; tokens show
-// the longest-unused first, so stale ones are on top.
+// the most recently used first, never-used ones last.
 const SORT_DEFAULTS = {
   access: { key: "when", dir: "desc" },
   now: { key: null, dir: "asc" },
   "24h": { key: "activity", dir: "desc" },
-  tokens: { key: "last_used", dir: "asc" },
+  tokens: { key: "last_used", dir: "desc" },
 };
 const sortIcon = (d) => `<svg class="sort-icon" aria-hidden="true" viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="${d}"></path></svg>`;
 const ICON_SORT_ASC = sortIcon("M12 19V5M6 11l6-6 6 6");

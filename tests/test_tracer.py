@@ -12,7 +12,7 @@ from homeassistant.config_entries import ConfigEntryState
 from homeassistant.core import HomeAssistant
 from homeassistant.setup import async_setup_component
 
-DOMAIN = "security_dashboard"
+DOMAIN = "security_monitor"
 
 
 def _load_fake_integration():
@@ -78,7 +78,7 @@ async def test_tracer_and_persistence(hass: HomeAssistant, hass_storage, socket_
     assert await hass.config_entries.async_unload(entry.entry_id)
     await hass.async_block_till_done()
     import aiohttp as _a
-    assert not getattr(_a.ClientSession._request, "_security_dashboard_tracer", False), "tracer not removed"
+    assert not getattr(_a.ClientSession._request, "_security_monitor_tracer", False), "tracer not removed"
 
     saved = hass_storage[f"{DOMAIN}.history"]["data"]
     assert saved["auth"]["events"][0]["ip"] == "198.51.100.9"
@@ -98,3 +98,62 @@ async def test_tracer_and_persistence(hass: HomeAssistant, hass_storage, socket_
     assert await hass.config_entries.async_remove(entry.entry_id)
     await hass.async_block_till_done()
     assert f"{DOMAIN}.history" not in hass_storage
+
+
+async def test_imports_history_from_security_dashboard(hass: HomeAssistant, hass_storage):
+    """First start after the rename takes over the old integration's history."""
+    hass_storage["security_dashboard.history"] = {
+        "version": 1,
+        "minor_version": 1,
+        "key": "security_dashboard.history",
+        "data": {
+            "auth": {"events": [{"timestamp": "2026-11-07T01:00:00+00:00", "kind": "failed_login",
+                                 "ip": "203.0.113.47", "user": None, "detail": "Invalid"}]},
+            "network": {"monitoring_since": "2026-11-01T00:00:00+00:00", "sockets": [], "hosts": {}},
+            "http": {"hosts": {"api.github.com": {"integrations": {"hacs": 3}, "first_seen": "2026-11-01T00:00:00+00:00",
+                                                  "last_seen": "2026-11-07T01:00:00+00:00", "hourly": {}}},
+                     "ip_map": {}},
+        },
+    }
+    assert await async_setup_component(hass, "http", {})
+    entry = MockConfigEntry(domain=DOMAIN, data={})
+    entry.add_to_hass(hass)
+    assert await hass.config_entries.async_setup(entry.entry_id)
+    await hass.async_block_till_done()
+
+    data = entry.runtime_data
+    assert data.auth.events[0].ip == "203.0.113.47"
+    assert data.network.monitoring_since.isoformat() == "2026-11-01T00:00:00+00:00"
+    assert "api.github.com" in data.tracer.hosts
+    assert f"{DOMAIN}.history" in hass_storage
+    assert "security_dashboard.history" not in hass_storage  # old integration isn't loaded
+
+    assert await hass.config_entries.async_unload(entry.entry_id)
+    await hass.async_block_till_done()
+
+
+async def test_tracer_unhooks_without_removing_later_wrappers(hass: HomeAssistant):
+    """If something wrapped aiohttp after us, stop() must not remove it."""
+    from custom_components.security_monitor.http_tracer import HttpTracer
+
+    original = aiohttp.ClientSession._request
+    tracer = HttpTracer(hass)
+    tracer.start()
+    ours = aiohttp.ClientSession._request
+
+    async def later_wrapper(*args, **kwargs):
+        return await ours(*args, **kwargs)
+
+    aiohttp.ClientSession._request = later_wrapper
+    try:
+        tracer.stop()
+        assert aiohttp.ClientSession._request is later_wrapper  # left alone
+        assert tracer._active is False  # ours is now a pass-through
+    finally:
+        aiohttp.ClientSession._request = original
+
+    # Normal case: nothing on top → original methods are restored
+    tracer2 = HttpTracer(hass)
+    tracer2.start()
+    tracer2.stop()
+    assert aiohttp.ClientSession._request is original

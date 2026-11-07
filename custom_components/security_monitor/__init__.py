@@ -1,4 +1,4 @@
-"""Security Dashboard for Home Assistant.
+"""Security Monitor for Home Assistant.
 
 Collects access/auth events, token hygiene and outbound network connections,
 exposes them over the websocket API and as entities, and bundles a sidebar
@@ -59,7 +59,7 @@ async def async_setup(hass: HomeAssistant, config: ConfigType) -> bool:
     """Register things that live for the whole HA run (once, not per entry)."""
     websocket_api.async_register(hass)
 
-    # Serve the bundled frontend: /security_dashboard_static/<file>
+    # Serve the bundled frontend: /security_monitor_static/<file>
     frontend_dir = Path(__file__).parent / "frontend"
     await hass.http.async_register_static_paths(
         [StaticPathConfig(STATIC_URL, str(frontend_dir), cache_headers=False)]

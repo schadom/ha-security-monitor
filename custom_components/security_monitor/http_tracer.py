@@ -45,8 +45,8 @@ from .const import DOMAIN
 
 _LOGGER = logging.getLogger(__name__)
 
-_MARK = "_security_dashboard_tracer"
-_CURRENT_CALLER: ContextVar[str | None] = ContextVar("security_dashboard_caller", default=None)
+_MARK = "_security_monitor_tracer"
+_CURRENT_CALLER: ContextVar[str | None] = ContextVar("security_monitor_caller", default=None)
 _COMPONENT_RE = re.compile(r"[/\\](?:homeassistant[/\\]components|custom_components)[/\\]([a-z0-9_]+)[/\\]")
 _PACKAGE_RE = re.compile(r"[/\\](?:site|dist)-packages[/\\]([A-Za-z0-9_]+)")
 _IGNORED_PACKAGES = {
@@ -99,6 +99,9 @@ class HttpTracer:
         self.ip_map: dict[str, dict[str, Any]] = {}
         self._lib_to_domain: dict[str, str] = {}
         self._originals: tuple[Callable[..., Any], Callable[..., Any]] | None = None
+        self._wrappers: tuple[Callable[..., Any], Callable[..., Any]] | None = None
+        # False after stop(): a wrapper that can't be unhooked becomes a pass-through
+        self._active = False
         # Hostnames whose connections went to a LAN/loopback address (e.g. shelly.local)
         self._local_hosts: set[str] = set()
         # Only outbound (internet) traffic matters here; LAN devices are skipped
@@ -137,7 +140,7 @@ class HttpTracer:
                 return await orig_request(session, method, str_or_url, *args, **kwargs)
             finally:
                 _CURRENT_CALLER.reset(token)
-                if host:
+                if host and tracer._active:
                     try:
                         tracer._record(host.lower(), caller)
                     except Exception:  # noqa: BLE001
@@ -147,7 +150,7 @@ class HttpTracer:
         async def _traced_connect(connector: aiohttp.TCPConnector, req: Any, *args: Any, **kwargs: Any):
             result = await orig_connect(connector, req, *args, **kwargs)
             try:
-                if peername := result[0].get_extra_info("peername"):
+                if tracer._active and (peername := result[0].get_extra_info("peername")):
                     tracer._record_peer((req.url.raw_host or "").lower(), peername[0], _CURRENT_CALLER.get())
             except Exception:  # noqa: BLE001
                 pass
@@ -156,11 +159,21 @@ class HttpTracer:
         setattr(_traced_request, _MARK, True)
         aiohttp.ClientSession._request = _traced_request
         aiohttp.TCPConnector._create_direct_connection = _traced_connect
+        self._wrappers = (_traced_request, _traced_connect)
+        self._active = True
 
     def stop(self) -> None:
-        if self._originals is not None:
-            aiohttp.ClientSession._request, aiohttp.TCPConnector._create_direct_connection = self._originals
-            self._originals = None
+        self._active = False
+        if self._originals is None or self._wrappers is None:
+            return
+        # Only unhook what is still ours on top. If something wrapped aiohttp after
+        # us (e.g. the old security_dashboard during an upgrade), restoring would
+        # remove its hook too, so our wrapper stays in place as a pass-through.
+        if aiohttp.ClientSession._request is self._wrappers[0]:
+            aiohttp.ClientSession._request = self._originals[0]
+        if aiohttp.TCPConnector._create_direct_connection is self._wrappers[1]:
+            aiohttp.TCPConnector._create_direct_connection = self._originals[1]
+        self._originals = self._wrappers = None
 
     def _record_peer(self, host: str, peer: str, caller: str | None) -> None:
         """A new TCP connection: remember which host/integration an IP belongs to."""

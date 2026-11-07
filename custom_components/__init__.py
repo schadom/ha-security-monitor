@@ -1,1 +1,1 @@
-"""Makes custom_components importable in tests; HACS only installs security_dashboard/."""
+"""Makes custom_components importable in tests; HACS only installs security_monitor/."""

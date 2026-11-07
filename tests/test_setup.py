@@ -7,7 +7,7 @@ from homeassistant.config_entries import ConfigEntryState
 from homeassistant.core import HomeAssistant
 from homeassistant.setup import async_setup_component
 
-DOMAIN = "security_dashboard"
+DOMAIN = "security_monitor"
 
 
 async def test_full_flow(hass: HomeAssistant, hass_ws_client, hass_client, hass_admin_user):
@@ -27,20 +27,20 @@ async def test_full_flow(hass: HomeAssistant, hass_ws_client, hass_client, hass_
 
     # Panel registered
     panels = hass.data["frontend_panels"]
-    assert "security-dashboard" in panels
-    print("panel:", panels["security-dashboard"].to_response())
+    assert "security-monitor" in panels
+    print("panel:", panels["security-monitor"].to_response())
 
     # Sensors
     states = sorted(s.entity_id for s in hass.states.async_all("sensor"))
     print("sensors:", states)
     assert states == [
-        "sensor.security_dashboard_failed_logins_24h",
-        "sensor.security_dashboard_outbound_connections",
+        "sensor.security_monitor_failed_logins_24h",
+        "sensor.security_monitor_outbound_connections",
     ]
 
     # Panel JS is served
     http = await hass_client()
-    resp = await http.get("/security_dashboard_static/security-dashboard-panel.js")
+    resp = await http.get("/security_monitor_static/security-monitor-panel.js")
     assert resp.status == 200
     assert "customElements.define" in await resp.text()
 
@@ -54,7 +54,7 @@ async def test_full_flow(hass: HomeAssistant, hass_ws_client, hass_client, hass_
 
     # Websocket overview
     client = await hass_ws_client(hass)
-    await client.send_json({"id": 1, "type": "security_dashboard/overview"})
+    await client.send_json({"id": 1, "type": "security_monitor/overview"})
     msg = await client.receive_json()
     assert msg["success"], msg
     res = msg["result"]
@@ -73,16 +73,16 @@ async def test_full_flow(hass: HomeAssistant, hass_ws_client, hass_client, hass_
         ("failed_login", "203.0.113.47"),
     ]
     assert all("curl" not in e["detail"] and "Mozilla" not in e["detail"] for e in ev)
-    assert hass.states.get("sensor.security_dashboard_failed_logins_24h").state == "2"
+    assert hass.states.get("sensor.security_monitor_failed_logins_24h").state == "2"
 
     # Run checks
-    await client.send_json({"id": 2, "type": "security_dashboard/run_checks"})
+    await client.send_json({"id": 2, "type": "security_monitor/run_checks"})
     msg = await client.receive_json()
     assert msg["success"], msg
     assert msg["result"]["network"]["scanned_at"]
 
     # 24 h destination tracking: baseline host, then a new one
-    from custom_components.security_dashboard.coordinator import NetworkSnapshot
+    from custom_components.security_monitor.coordinator import NetworkSnapshot
     coord = entry.runtime_data.network
 
     def conn(host, ip, lport):
@@ -123,7 +123,7 @@ async def test_full_flow(hass: HomeAssistant, hass_ws_client, hass_client, hass_
     assert s3.connections[0]["integration"] == "vendor"
 
     # Subscription pushes data
-    await client.send_json({"id": 3, "type": "security_dashboard/subscribe"})
+    await client.send_json({"id": 3, "type": "security_monitor/subscribe"})
     msg = await client.receive_json()
     assert msg["success"], msg
     msg = await client.receive_json()
@@ -132,7 +132,7 @@ async def test_full_flow(hass: HomeAssistant, hass_ws_client, hass_client, hass_
     # Unload + reload
     assert await hass.config_entries.async_unload(entry.entry_id)
     await hass.async_block_till_done()
-    assert "security-dashboard" not in hass.data["frontend_panels"]
+    assert "security-monitor" not in hass.data["frontend_panels"]
     assert await hass.config_entries.async_setup(entry.entry_id)
     await hass.async_block_till_done()
     assert entry.state is ConfigEntryState.LOADED

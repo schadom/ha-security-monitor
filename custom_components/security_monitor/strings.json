@@ -2,12 +2,12 @@
   "config": {
     "step": {
       "user": {
-        "title": "Security Dashboard",
+        "title": "Security Monitor",
         "description": "Adds a Security Monitor panel to the sidebar (admins only) that shows access logs, token hygiene and outbound connections."
       }
     },
     "abort": {
-      "single_instance_allowed": "Security Dashboard is already set up."
+      "single_instance_allowed": "Security Monitor is already set up."
     }
   },
   "entity": {

@@ -1,4 +1,4 @@
-# Security Dashboard integration
+# Security Monitor integration
 
 [![GitHub Release][releases-shield]][releases]
 [![GitHub Activity][commits-shield]][commits]
@@ -37,35 +37,52 @@ The **Connections** tab, **Last 24 h** view:
 
 ## Installation with HACS
 
-[![Open your Home Assistant instance and open a repository inside the Home Assistant Community Store.](https://my.home-assistant.io/badges/hacs_repository.svg)](https://my.home-assistant.io/redirect/hacs_repository/?owner=schadom&repository=hacs_security_dashboard&category=integration)
+[![Open your Home Assistant instance and open a repository inside the Home Assistant Community Store.](https://my.home-assistant.io/badges/hacs_repository.svg)](https://my.home-assistant.io/redirect/hacs_repository/?owner=schadom&repository=hacs_security_monitor&category=integration)
 
 1. Add this repository as a custom repository of category **Integration**.
-2. Install **Security Dashboard** and restart Home Assistant.
-3. In **Settings > Devices & services > Add integration**, add **Security Dashboard**.
+2. Install **Security Monitor** and restart Home Assistant.
+3. In **Settings > Devices & services > Add integration**, add **Security Monitor**.
    There is nothing to configure.
 4. Open **Security Monitor** in the sidebar. The panel is only visible to administrators.
 
-To install manually, copy `custom_components/security_dashboard` into the
+To install manually, copy `custom_components/security_monitor` into the
 `custom_components` folder of your Home Assistant configuration and restart.
 
 Requires Home Assistant **2026.2.0** or newer.
 
+### Upgrading from Security Dashboard
+
+Up to version 0.3.1 this integration was called **Security Dashboard**
+(`security_dashboard`). Home Assistant treats the renamed integration as a new
+one, so it has to be added again. Add the new integration **before** deleting
+the old one: deleting **Security Dashboard** while it is still installed also
+deletes its history.
+
+1. In HACS, download the latest version and restart Home Assistant.
+2. In **Settings > Devices & services > Add integration**, add **Security Monitor**.
+   On its first start it imports the access log and connection history from
+   Security Dashboard.
+3. Delete the **Security Dashboard** entry. If the folder
+   `custom_components/security_dashboard` still exists, delete it and restart.
+4. Update automations and dashboards: `sensor.security_dashboard_*` is now
+   `sensor.security_monitor_*`.
+
 ### Entities
 
-The integration adds a **Security Dashboard** service device with two sensors
+The integration adds a **Security Monitor** service device with two sensors
 for use in automations:
 
-- `sensor.security_dashboard_failed_logins_24h`: failed logins in the last 24 hours
-- `sensor.security_dashboard_outbound_connections`: connections to internet hosts
+- `sensor.security_monitor_failed_logins_24h`: failed logins in the last 24 hours
+- `sensor.security_monitor_outbound_connections`: connections to internet hosts
   open right now. The attribute `top_destinations` lists the busiest hosts.
 
 ## Removal
 
-1. In **Settings > Devices & services**, open **Security Dashboard**, open the
+1. In **Settings > Devices & services**, open **Security Monitor**, open the
    entry's menu and choose **Delete**. This removes the panel, the sensors and the
    stored history.
-2. To remove the integration completely, uninstall **Security Dashboard** in HACS
-   (or delete `custom_components/security_dashboard`) and restart Home Assistant.
+2. To remove the integration completely, uninstall **Security Monitor** in HACS
+   (or delete `custom_components/security_monitor`) and restart Home Assistant.
 
 ## How it works
 
@@ -91,7 +108,7 @@ integration that requires that library.
 **New destinations.** Hosts first seen during the first hour of monitoring are
 the baseline. Hosts that appear later are marked **New** for 24 hours.
 
-**Storage.** History is kept in `.storage/security_dashboard.history`. It is
+**Storage.** History is kept in `.storage/security_monitor.history`. It is
 saved every 5 minutes and when Home Assistant stops, and deleted when you
 remove the integration.
 
@@ -109,7 +126,7 @@ docker compose up -d
 ```
 
 Open <http://localhost:8123>, complete Home Assistant onboarding, then add
-**Security Dashboard**. The test configuration enables IP banning after five
+**Security Monitor**. The test configuration enables IP banning after five
 failed attempts and debug logging for the integration.
 
 To produce access-log entries, log out and sign in with a wrong password a few
@@ -199,16 +216,16 @@ attribution against a local server, and persistence across a reload.
   ```yaml
   logger:
     logs:
-      custom_components.security_dashboard: debug
+      custom_components.security_monitor: debug
   ```
 
-[hacs_security_dashboard]: https://github.com/schadom/hacs_security_dashboard
-[commits-shield]: https://img.shields.io/github/commit-activity/y/schadom/hacs_security_dashboard.svg?style=for-the-badge
-[commits]: https://github.com/schadom/hacs_security_dashboard/commits/main
+[hacs_security_monitor]: https://github.com/schadom/hacs_security_monitor
+[commits-shield]: https://img.shields.io/github/commit-activity/y/schadom/hacs_security_monitor.svg?style=for-the-badge
+[commits]: https://github.com/schadom/hacs_security_monitor/commits/main
 [hacs]: https://github.com/hacs/integration
 [hacsbadge]: https://img.shields.io/badge/HACS-Custom-41BDF5.svg?style=for-the-badge
-[license-shield]: https://img.shields.io/github/license/schadom/hacs_security_dashboard.svg?style=for-the-badge
-[demo]: https://raw.githubusercontent.com/schadom/hacs_security_dashboard/refs/heads/main/demo.png
-[connections]: https://raw.githubusercontent.com/schadom/hacs_security_dashboard/refs/heads/main/connections.png
-[releases-shield]: https://img.shields.io/github/release/schadom/hacs_security_dashboard.svg?style=for-the-badge
-[releases]: https://github.com/schadom/hacs_security_dashboard/releases
+[license-shield]: https://img.shields.io/github/license/schadom/hacs_security_monitor.svg?style=for-the-badge
+[demo]: https://raw.githubusercontent.com/schadom/hacs_security_monitor/refs/heads/main/demo.png
+[connections]: https://raw.githubusercontent.com/schadom/hacs_security_monitor/refs/heads/main/connections.png
+[releases-shield]: https://img.shields.io/github/release/schadom/hacs_security_monitor.svg?style=for-the-badge
+[releases]: https://github.com/schadom/hacs_security_monitor/releases

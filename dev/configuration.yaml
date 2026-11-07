@@ -1,5 +1,5 @@
 homeassistant:
-  name: Security Dashboard Test
+  name: Security Monitor Test
   unit_system: metric
   time_zone: Europe/Vienna
 
@@ -12,4 +12,4 @@ http:
 logger:
   default: warning
   logs:
-    custom_components.security_dashboard: debug
+    custom_components.security_monitor: debug

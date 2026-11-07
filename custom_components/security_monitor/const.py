@@ -1,19 +1,19 @@
-"""Constants for the Security Dashboard integration."""
+"""Constants for the Security Monitor integration."""
 
 from __future__ import annotations
 
 from datetime import timedelta
 from typing import Final
 
-DOMAIN: Final = "security_dashboard"
+DOMAIN: Final = "security_monitor"
 
 # Frontend panel
-PANEL_URL_PATH: Final = "security-dashboard"
+PANEL_URL_PATH: Final = "security-monitor"
 PANEL_TITLE: Final = "Security Monitor"
 PANEL_ICON: Final = "mdi:shield-lock-outline"
-PANEL_WEBCOMPONENT: Final = "security-dashboard-panel"
+PANEL_WEBCOMPONENT: Final = "security-monitor-panel"
 STATIC_URL: Final = f"/{DOMAIN}_static"
-PANEL_JS: Final = "security-dashboard-panel.js"
+PANEL_JS: Final = "security-monitor-panel.js"
 
 # Collection
 NETWORK_SCAN_INTERVAL: Final = timedelta(seconds=30)

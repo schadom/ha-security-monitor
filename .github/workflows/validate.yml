@@ -16,7 +16,7 @@ jobs:
           cache: pip
       - run: python -m pip install -r requirements-dev.txt
       - run: python -m ruff check custom_components tests
-      - run: python -m pytest -q --cov=custom_components.security_dashboard --cov-report=term-missing --cov-fail-under=90
+      - run: python -m pytest -q --cov=custom_components.security_monitor --cov-report=term-missing --cov-fail-under=90
       - run: docker compose config --quiet
   hacs:
     runs-on: ubuntu-latest

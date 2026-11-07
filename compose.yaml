@@ -1,4 +1,4 @@
-name: security-dashboard-dev
+name: security-monitor-dev
 
 services:
   homeassistant:
@@ -10,7 +10,7 @@ services:
     volumes:
       - ha-config:/config
       - ./dev/configuration.yaml:/config/configuration.yaml:ro
-      - ./custom_components/security_dashboard:/config/custom_components/security_dashboard:ro
+      - ./custom_components/security_monitor:/config/custom_components/security_monitor:ro
 
 volumes:
   ha-config:

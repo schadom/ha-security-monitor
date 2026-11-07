@@ -1,6 +1,6 @@
 {
-  "domain": "security_dashboard",
-  "name": "Security Dashboard",
+  "domain": "security_monitor",
+  "name": "Security Monitor",
   "categories": [
     "security_safety",
     "computers_network.monitoring"
@@ -15,13 +15,13 @@
     "panel_custom",
     "websocket_api"
   ],
-  "documentation": "https://github.com/schadom/hacs_security_dashboard",
+  "documentation": "https://github.com/schadom/hacs_security_monitor",
   "integration_type": "service",
   "iot_class": "local_polling",
-  "issue_tracker": "https://github.com/schadom/hacs_security_dashboard/issues",
+  "issue_tracker": "https://github.com/schadom/hacs_security_monitor/issues",
   "requirements": [
     "psutil>=5.9.0"
   ],
   "single_config_entry": true,
-  "version": "0.3.1"
+  "version": "0.4.0"
 }

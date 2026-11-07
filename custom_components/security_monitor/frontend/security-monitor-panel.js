@@ -1,4 +1,4 @@
-// Security Dashboard panel — plain web component, no build step required.
+// Security Monitor panel — plain web component, no build step required.
 // HA sets `hass`, `narrow`, `route` and `panel` on the element.
 
 const C = {
@@ -77,7 +77,7 @@ const fmtDateTime = (iso) => {
 
 const KIND_LABEL = { failed_login: "Failed login", banned: "IP banned", token_used: "Token used" };
 
-class SecurityDashboardPanel extends HTMLElement {
+class SecurityMonitorPanel extends HTMLElement {
   constructor() {
     super();
     this.attachShadow({ mode: "open" });
@@ -135,7 +135,7 @@ class SecurityDashboardPanel extends HTMLElement {
           this._error = undefined;
           this._render();
         },
-        { type: "security_dashboard/subscribe" },
+        { type: "security_monitor/subscribe" },
       );
     } catch (err) {
       this._error = err.message || String(err);
@@ -148,7 +148,7 @@ class SecurityDashboardPanel extends HTMLElement {
     this._running = true;
     this._render();
     try {
-      this._data = await this._hass.callWS({ type: "security_dashboard/run_checks" });
+      this._data = await this._hass.callWS({ type: "security_monitor/run_checks" });
     } catch (err) {
       this._error = err.message || String(err);
     }
@@ -529,4 +529,4 @@ class SecurityDashboardPanel extends HTMLElement {
   }
 }
 
-customElements.define("security-dashboard-panel", SecurityDashboardPanel);
+customElements.define("security-monitor-panel", SecurityMonitorPanel);

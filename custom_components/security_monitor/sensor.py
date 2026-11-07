@@ -15,10 +15,10 @@ from .coordinator import NetworkCoordinator
 
 
 def _device(entry_id: str) -> DeviceInfo:
-    """One service device, so entity IDs become sensor.security_dashboard_*."""
+    """One service device, so entity IDs become sensor.security_monitor_*."""
     return DeviceInfo(
         identifiers={(DOMAIN, entry_id)},
-        name="Security Dashboard",
+        name="Security Monitor",
         entry_type=DeviceEntryType.SERVICE,
     )
 

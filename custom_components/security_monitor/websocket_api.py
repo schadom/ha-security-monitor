@@ -60,7 +60,7 @@ async def ws_overview(
     """One-shot fetch of everything the dashboard shows."""
     overview = await _build_overview(hass)
     if overview is None:
-        connection.send_error(msg["id"], "not_loaded", "Security Dashboard is not set up")
+        connection.send_error(msg["id"], "not_loaded", "Security Monitor is not set up")
         return
     connection.send_result(msg["id"], overview)
 
@@ -97,7 +97,7 @@ async def ws_run_checks(
     """Rescan connections, re-run checks and refresh Repairs now."""
     entry = _loaded_entry(hass)
     if entry is None:
-        connection.send_error(msg["id"], "not_loaded", "Security Dashboard is not set up")
+        connection.send_error(msg["id"], "not_loaded", "Security Monitor is not set up")
         return
     await entry.runtime_data.network.async_refresh()  # fires SIGNAL_UPDATED → subscribers get fresh data
     await async_check_issues(hass, entry)

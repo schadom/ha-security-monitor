@@ -1,6 +1,6 @@
 """Persist the access log and destination history across restarts.
 
-Stored in <config>/.storage/security_dashboard.history. Only hostnames, IPs,
+Stored in <config>/.storage/security_monitor.history. Only hostnames, IPs,
 integration names, counts and timestamps are kept, never URLs, paths or
 payloads.
 """
@@ -9,6 +9,7 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from datetime import timedelta
+import logging
 from typing import Any
 
 from homeassistant.const import EVENT_HOMEASSISTANT_STOP
@@ -18,8 +19,13 @@ from homeassistant.helpers.storage import Store
 
 from .const import DOMAIN
 
+_LOGGER = logging.getLogger(__name__)
+
 STORAGE_VERSION = 1
 STORAGE_KEY = f"{DOMAIN}.history"
+# Until v0.3.1 this integration was called "Security Dashboard" (domain security_dashboard)
+LEGACY_DOMAIN = "security_dashboard"
+LEGACY_STORAGE_KEY = f"{LEGACY_DOMAIN}.history"
 SAVE_INTERVAL = timedelta(minutes=5)
 
 
@@ -38,7 +44,23 @@ class HistoryStore:
         self._unsubs: list[Callable[[], None]] = []
 
     async def async_load(self) -> dict[str, Any]:
-        return await self._store.async_load() or {}
+        if data := await self._store.async_load():
+            return data
+        return await self._async_import_legacy()
+
+    async def _async_import_legacy(self) -> dict[str, Any]:
+        """First start after the rename: take over the old integration's history."""
+        legacy: Store[dict[str, Any]] = Store(self.hass, STORAGE_VERSION, LEGACY_STORAGE_KEY)
+        data = await legacy.async_load()
+        if not data:
+            return {}
+        await self._store.async_save(data)
+        _LOGGER.info("Imported access log and connection history from %s", LEGACY_STORAGE_KEY)
+        # While the old integration is still loaded it owns its file (and deletes it
+        # when removed); otherwise nothing else will clean it up.
+        if LEGACY_DOMAIN not in self.hass.config.components:
+            await legacy.async_remove()
+        return data
 
     @callback
     def async_start(self, data_func: Callable[[], dict[str, Any]]) -> None:

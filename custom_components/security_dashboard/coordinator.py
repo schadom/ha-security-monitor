@@ -5,8 +5,12 @@ Uses psutil.net_connections(). Visibility depends on the install type:
   so you see host-wide sockets, but PID → process mapping is limited to the
   Core container. Add-on traffic shows up without an owner.
 - Container: only what the container's network namespace sees.
-- Short-lived connections between polls are missed. For full coverage pair
-  this with a companion add-on (conntrack) or DNS logs from Pi-hole/AdGuard.
+- Short-lived connections between polls are missed. The HTTP tracer covers
+  most of those for aiohttp traffic; for everything else pair this with a
+  companion add-on (conntrack) or DNS logs from Pi-hole/AdGuard.
+
+Each socket is labelled with the hostname and integration the HTTP tracer saw
+for its peer IP, falling back to reverse DNS.
 """
 
 from __future__ import annotations
@@ -30,8 +34,14 @@ from .const import DOMAIN, NETWORK_SCAN_INTERVAL, SIGNAL_UPDATED
 
 if TYPE_CHECKING:
     from . import SecurityConfigEntry
+    from .http_tracer import HttpTracer
 
 _LOGGER = logging.getLogger(__name__)
+
+# Destinations first seen during this window after monitoring started are the
+# baseline; only later ones are flagged as new.
+LEARNING_PERIOD = timedelta(hours=1)
+HOST_RETENTION = timedelta(days=7)
 
 
 @dataclass
@@ -40,9 +50,11 @@ class NetworkSnapshot:
     connections: list[dict[str, Any]] = field(default_factory=list)
     listening: list[dict[str, Any]] = field(default_factory=list)
     destinations: list[dict[str, Any]] = field(default_factory=list)
-    # Rolling 24 h view: distinct connections per destination, plus "new" hosts
+    # Rolling 24 h view merged from HTTP tracing and the socket scan
     destinations_24h: list[dict[str, Any]] = field(default_factory=list)
     new_destinations_24h: int = 0
+    monitoring_since: str | None = None
+    learning_until: str | None = None
 
     @property
     def outbound_count(self) -> int:
@@ -90,21 +102,23 @@ def _scan(rdns_cache: dict[str, str | None]) -> NetworkSnapshot:
                     "process": _process_name(conn.pid),
                 }
             )
+    return NetworkSnapshot(scanned_at=dt_util.utcnow().isoformat(), connections=outbound, listening=listening)
 
-    per_dest = Counter((c["hostname"] or c["remote_ip"]) for c in outbound)
-    destinations = [{"host": h, "connections": n} for h, n in per_dest.most_common()]
-    return NetworkSnapshot(
-        scanned_at=dt_util.utcnow().isoformat(),
-        connections=outbound,
-        listening=listening,
-        destinations=destinations,
-    )
+
+def _parse(value: str | None) -> datetime | None:
+    return dt_util.parse_datetime(value) if value else None
 
 
 class NetworkCoordinator(DataUpdateCoordinator[NetworkSnapshot]):
     """Polls sockets and token usage on a fixed interval."""
 
-    def __init__(self, hass: HomeAssistant, entry: SecurityConfigEntry) -> None:
+    def __init__(
+        self,
+        hass: HomeAssistant,
+        entry: SecurityConfigEntry,
+        tracer: HttpTracer,
+        restored: dict[str, Any] | None = None,
+    ) -> None:
         super().__init__(
             hass,
             _LOGGER,
@@ -112,50 +126,106 @@ class NetworkCoordinator(DataUpdateCoordinator[NetworkSnapshot]):
             name=f"{DOMAIN}_network",
             update_interval=NETWORK_SCAN_INTERVAL,
         )
+        self.tracer = tracer
         self._rdns_cache: dict[str, str | None] = {}
+        restored = restored or {}
+        self.monitoring_since: datetime = _parse(restored.get("monitoring_since")) or dt_util.utcnow()
         # (remote_ip, remote_port, local_port) -> (host, first seen): each socket counts once
         self._sockets: dict[tuple, tuple[str, datetime]] = {}
-        # host -> first seen (None = already present when monitoring started), last seen
-        self._hosts: dict[str, dict[str, datetime | None]] = {}
-        self._baseline_done = False
+        for item in restored.get("sockets", []):
+            if (seen := _parse(item.get("seen"))) is not None:
+                self._sockets[tuple(item["key"])] = (item["host"], seen)
+        # host -> {"first_seen": iso, "last_seen": iso}  (socket-observed hosts)
+        self._hosts: dict[str, dict[str, str]] = dict(restored.get("hosts", {}))
+
+    # ------------------------------------------------------------ persistence
+
+    def as_dict(self) -> dict[str, Any]:
+        return {
+            "monitoring_since": self.monitoring_since.isoformat(),
+            "sockets": [
+                {"key": list(key), "host": host, "seen": seen.isoformat()}
+                for key, (host, seen) in self._sockets.items()
+            ],
+            "hosts": self._hosts,
+        }
+
+    # ------------------------------------------------------------ tracking
+
+    def _is_new(self, first_seen: str | None, day_ago: datetime) -> bool:
+        first = _parse(first_seen)
+        return first is not None and first > day_ago and first > self.monitoring_since + LEARNING_PERIOD
 
     def _track(self, snapshot: NetworkSnapshot) -> None:
-        """Fold one scan into the rolling 24 h destination stats."""
+        """Label sockets and fold the scan into the rolling 24 h view."""
         now = dt_util.utcnow()
+        now_iso = now.isoformat()
         day_ago = now - timedelta(hours=24)
+        self.tracer.prune()
 
         for c in snapshot.connections:
-            host = c["hostname"] or c["remote_ip"]
+            traced = self.tracer.lookup_ip(c["remote_ip"])
+            c["traced_host"] = traced["host"] if traced else None
+            c["integration"] = traced["integration"] if traced else None
+            host = c["traced_host"] or c["hostname"] or c["remote_ip"]
             key = (c["remote_ip"], c["remote_port"], c["local_port"])
             self._sockets.setdefault(key, (host, now))
-            if host in self._hosts:
-                self._hosts[host]["last_seen"] = now
-            else:
-                # Hosts in the very first scan are the baseline, not "new"
-                self._hosts[host] = {
-                    "first_seen": now if self._baseline_done else None,
-                    "last_seen": now,
-                }
-        self._baseline_done = True
+            entry = self._hosts.setdefault(host, {"first_seen": now_iso, "last_seen": now_iso})
+            entry["last_seen"] = now_iso
 
         self._sockets = {k: v for k, v in self._sockets.items() if v[1] > day_ago}
-        week_ago = now - timedelta(days=7)
-        self._hosts = {h: v for h, v in self._hosts.items() if v["last_seen"] > week_ago}
+        cutoff = (now - HOST_RETENTION).isoformat()
+        self._hosts = {h: v for h, v in self._hosts.items() if v["last_seen"] > cutoff}
 
-        per_host = Counter(host for host, _ in self._sockets.values())
-        destinations = []
-        for host, count in per_host.most_common():
-            first_seen = self._hosts.get(host, {}).get("first_seen")
-            destinations.append(
-                {
-                    "host": host,
-                    "connections": count,
-                    "new": first_seen is not None and first_seen > day_ago,
-                    "first_seen": first_seen.isoformat() if first_seen else None,
-                }
+        # Merge: HTTP-traced hosts (requests) + socket-observed hosts (connections)
+        merged: dict[str, dict[str, Any]] = {}
+        for t in self.tracer.hosts_24h():
+            merged[t["host"]] = {
+                "host": t["host"],
+                "requests": t["requests"],
+                "connections": 0,
+                "integrations": t["integrations"],
+                "first_seen": t["first_seen"],
+                "last_seen": t["last_seen"],
+            }
+        sockets_per_host = Counter(host for host, _ in self._sockets.values())
+        integration_per_host: dict[str, str] = {}
+        for c in snapshot.connections:
+            if c["integration"]:
+                integration_per_host[c["traced_host"]] = c["integration"]
+        for host, count in sockets_per_host.items():
+            seen = self._hosts.get(host, {})
+            item = merged.setdefault(
+                host,
+                {"host": host, "requests": 0, "connections": 0, "integrations": [],
+                 "first_seen": seen.get("first_seen"), "last_seen": seen.get("last_seen")},
             )
+            item["connections"] = count
+            if not item["integrations"] and host in integration_per_host:
+                item["integrations"] = [integration_per_host[host]]
+            # Earliest first sighting / latest last sighting across both sources
+            if seen.get("first_seen") and (item["first_seen"] is None or seen["first_seen"] < item["first_seen"]):
+                item["first_seen"] = seen["first_seen"]
+            if seen.get("last_seen") and (item["last_seen"] is None or seen["last_seen"] > item["last_seen"]):
+                item["last_seen"] = seen["last_seen"]
+
+        destinations = list(merged.values())
+        for d in destinations:
+            d["new"] = self._is_new(d["first_seen"], day_ago)
+            d["activity"] = d["requests"] + d["connections"]
+        destinations.sort(key=lambda d: d["activity"], reverse=True)
+
+        snapshot.destinations = [
+            {"host": h, "connections": n}
+            for h, n in Counter(
+                (c["traced_host"] or c["hostname"] or c["remote_ip"]) for c in snapshot.connections
+            ).most_common()
+        ]
         snapshot.destinations_24h = destinations
         snapshot.new_destinations_24h = sum(1 for d in destinations if d["new"])
+        snapshot.monitoring_since = self.monitoring_since.isoformat()
+        learning_until = self.monitoring_since + LEARNING_PERIOD
+        snapshot.learning_until = learning_until.isoformat() if learning_until > now else None
 
     async def _async_update_data(self) -> NetworkSnapshot:
         snapshot = await self.hass.async_add_executor_job(_scan, self._rdns_cache)

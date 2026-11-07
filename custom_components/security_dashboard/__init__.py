@@ -8,6 +8,7 @@ panel that renders the dashboard.
 from __future__ import annotations
 
 from dataclasses import dataclass
+from datetime import timedelta
 from pathlib import Path
 
 from homeassistant.components import frontend, panel_custom
@@ -16,6 +17,8 @@ from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import Platform
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers import config_validation as cv
+from homeassistant.helpers.event import async_track_time_interval
+from homeassistant.helpers.start import async_at_started
 from homeassistant.helpers.typing import ConfigType
 from homeassistant.loader import async_get_integration
 
@@ -31,7 +34,9 @@ from .const import (
     STATIC_URL,
 )
 from .coordinator import NetworkCoordinator
+from .http_tracer import HttpTracer
 from .repairs import async_check_issues
+from .storage import HistoryStore
 
 PLATFORMS: list[Platform] = [Platform.SENSOR]
 CONFIG_SCHEMA = cv.config_entry_only_config_schema(DOMAIN)
@@ -43,6 +48,8 @@ class SecurityData:
 
     auth: AuthMonitor
     network: NetworkCoordinator
+    tracer: HttpTracer
+    store: HistoryStore
 
 
 type SecurityConfigEntry = ConfigEntry[SecurityData]
@@ -62,14 +69,34 @@ async def async_setup(hass: HomeAssistant, config: ConfigType) -> bool:
 
 async def async_setup_entry(hass: HomeAssistant, entry: SecurityConfigEntry) -> bool:
     """Set up the integration from a config entry."""
-    auth = AuthMonitor(hass)
+    store = HistoryStore(hass)
+    restored = await store.async_load()
+
+    auth = AuthMonitor(hass, restored.get("auth"))
     await auth.async_start()
 
-    network = NetworkCoordinator(hass, entry)
+    # Attribute outbound HTTP traffic to integrations (wraps aiohttp once)
+    tracer = HttpTracer(hass, restored.get("http"))
+    tracer.start()
+
+    network = NetworkCoordinator(hass, entry, tracer, restored.get("network"))
+    entry.runtime_data = SecurityData(auth=auth, network=network, tracer=tracer, store=store)
     await network.async_config_entry_first_refresh()
 
-    entry.runtime_data = SecurityData(auth=auth, network=network)
     entry.async_on_unload(auth.async_stop)
+    entry.async_on_unload(tracer.stop)
+
+    # Persist access log + destination history every 5 min and on shutdown
+    store.async_start(
+        lambda: {"auth": auth.as_dict(), "network": network.as_dict(), "http": tracer.as_dict()}
+    )
+
+    # Map library packages → integrations once everything has loaded, then every 6 h
+    async def _build_library_map(*_: object) -> None:
+        await tracer.async_build_library_map()
+
+    entry.async_on_unload(async_at_started(hass, _build_library_map))
+    entry.async_on_unload(async_track_time_interval(hass, _build_library_map, timedelta(hours=6)))
 
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
 
@@ -95,4 +122,12 @@ async def async_setup_entry(hass: HomeAssistant, entry: SecurityConfigEntry) -> 
 async def async_unload_entry(hass: HomeAssistant, entry: SecurityConfigEntry) -> bool:
     """Unload a config entry."""
     frontend.async_remove_panel(hass, PANEL_URL_PATH)
-    return await hass.config_entries.async_unload_platforms(entry, PLATFORMS)
+    unloaded = await hass.config_entries.async_unload_platforms(entry, PLATFORMS)
+    if unloaded:
+        await entry.runtime_data.store.async_stop()
+    return unloaded
+
+
+async def async_remove_entry(hass: HomeAssistant, entry: SecurityConfigEntry) -> None:
+    """Integration removed: delete the stored history too."""
+    await HistoryStore(hass).async_remove()

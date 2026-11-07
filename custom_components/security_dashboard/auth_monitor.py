@@ -75,9 +75,15 @@ class _BanLogHandler(logging.Handler):
 class AuthMonitor:
     """Keeps a rolling access log and answers auth-hygiene questions."""
 
-    def __init__(self, hass: HomeAssistant) -> None:
+    def __init__(self, hass: HomeAssistant, restored: dict[str, Any] | None = None) -> None:
         self.hass = hass
         self.events: deque[AuthEvent] = deque(maxlen=AUTH_EVENT_BUFFER)
+        # Restored log is stored newest first, same as the deque
+        for item in (restored or {}).get("events", []):
+            try:
+                self.events.append(AuthEvent(**item))
+            except TypeError:
+                continue  # stored by an incompatible version
         self._handler = _BanLogHandler(self)
         self._seen_token_use: dict[str, str] = {}
 
@@ -97,6 +103,9 @@ class AuthMonitor:
     @callback
     def async_stop(self) -> None:
         logging.getLogger(BAN_LOGGER).removeHandler(self._handler)
+
+    def as_dict(self) -> dict[str, Any]:
+        return {"events": [asdict(e) for e in self.events]}
 
     @callback
     def add_event(self, event: AuthEvent) -> None:

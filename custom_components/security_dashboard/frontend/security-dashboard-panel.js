@@ -24,35 +24,55 @@ const ago = (iso) => {
 const hourLabel = (date) => `${String(date.getHours()).padStart(2, "0")}:00`;
 const plural = (n, one, many) => `${n} ${n === 1 ? one : many}`;
 
-// "Browser · homeassistant.lan" for clients identified only by URL
-const prettyClient = (client) => {
-  if (!client) return "Unknown client";
+// Official apps identify themselves with a home-assistant.io URL as client ID
+const APP_CLIENTS = {
+  "/ios": "Home Assistant iOS app",
+  "/android": "Home Assistant Android app",
+  "/companion-app": "Home Assistant companion app",
+};
+
+// Human label for a token's client.
+//   http://homeassistant.lan:8123/ + session → "Browser session · homeassistant.lan"
+//   https://home-assistant.io/iOS            → "Home Assistant iOS app"
+//   Node-RED + long-lived                    → "Node-RED · long-lived token"
+const prettyClient = (client, type) => {
+  if (type === "long_lived_access_token") return `${client || "Unnamed"} · long-lived token`;
+  if (!client) return type === "system" ? "System" : "Unknown client";
   try {
     const u = new URL(client);
-    if (u.protocol.startsWith("http")) return `Browser · ${u.hostname}`;
+    if (u.protocol.startsWith("http")) {
+      if (/(^|\.)home-assistant\.io$/.test(u.hostname)) {
+        const app = APP_CLIENTS[u.pathname.toLowerCase().replace(/\/$/, "")];
+        return app || `Home Assistant app · ${u.pathname}`;
+      }
+      return `Browser session · ${u.hostname}`;
+    }
   } catch (_) { /* not a URL */ }
-  return client;
+  return type === "normal" ? `${client} · session` : client;
 };
-const prettyTokenType = (t) =>
-  ({ normal: "session", long_lived_access_token: "long-lived token", system: "system" }[t] || t);
 
 // Short, readable detail line per event; the raw text goes into the tooltip
 const prettyDetail = (e) => {
   if (e.kind === "failed_login") {
     const url = /Requested URL: '([^']*)'/.exec(e.detail);
-    const host = /authentication from (\S+) \(/.exec(e.detail);
     let path = url ? url[1].split("?")[0] : null;
     if (path) path = path.replace(/^(\/auth\/login_flow)\/[0-9a-f]+$/i, "$1");
-    let text = path ? `Invalid authentication on ${path}` : "Invalid authentication";
-    if (host && host[1] !== e.ip) text += ` · ${host[1]}`;
-    return text;
+    return path ? `Invalid login · ${path}` : "Invalid login";
   }
-  if (e.kind === "banned") return "Banned for too many failed login attempts";
+  if (e.kind === "banned") return "Banned after too many failed logins";
   if (e.kind === "token_used") {
     const m = /^(.*) \(([a-z_]+)\)$/.exec(e.detail);
-    return m ? `${prettyClient(m[1])} · ${prettyTokenType(m[2])}` : e.detail;
+    return m ? prettyClient(m[1], m[2]) : e.detail;
   }
   return e.detail;
+};
+
+const fmtDateTime = (iso) => {
+  if (!iso) return "—";
+  const d = new Date(iso);
+  const sameDay = d.toDateString() === new Date().toDateString();
+  const time = d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+  return sameDay ? `Today ${time}` : `${d.toLocaleDateString([], { day: "numeric", month: "short" })} ${time}`;
 };
 
 const KIND_LABEL = { failed_login: "Failed login", banned: "IP banned", token_used: "Token used" };
@@ -63,13 +83,26 @@ class SecurityDashboardPanel extends HTMLElement {
     this.attachShadow({ mode: "open" });
     this._data = null;
     this._tab = "access";
+    this._netView = "now";
     this._running = false;
   }
 
+  // HA calls this on every state change, so it must stay cheap: no re-render here
   set hass(hass) {
     const first = !this._hass;
     this._hass = hass;
-    if (first) this._subscribe();
+    if (first) {
+      // Integration titles ("hacs" → "HACS") for the Integration columns
+      try { hass.loadBackendTranslation?.("title"); } catch (_) { /* optional */ }
+      this._subscribe();
+    }
+  }
+
+  _integrationName(domain) {
+    if (!domain) return null;
+    if (domain.startsWith("lib:")) return `${domain.slice(4)} (library)`;
+    const title = this._hass?.localize?.(`component.${domain}.title`);
+    return title || domain;
   }
 
   set narrow(v) {
@@ -182,7 +215,7 @@ class SecurityDashboardPanel extends HTMLElement {
             : "No failed attempts",
           a.failed_logins_24h ? C.high : null)}
         ${tile(net ? net.connections.length : "–", "Outbound connections",
-          newDest ? `${plural(newDest, "destination", "destinations")} first seen today` : "No new destinations today")}
+          newDest ? `${plural(newDest, "new destination", "new destinations")} in 24 h` : "No new destinations in 24 h")}
         ${tile(llat.length, "Long-lived tokens",
           stale ? `${stale} unused for 90+ days` : "None unused for 90+ days",
           stale ? C.medium : null)}
@@ -243,30 +276,73 @@ class SecurityDashboardPanel extends HTMLElement {
   _networkTable(d) {
     const net = d.network;
     if (!net) return `<div class="empty">Waiting for the first scan…</div>`;
+    const views = [["now", "Open now"], ["24h", "Last 24 h"]]
+      .map(([id, label]) => `<button type="button" data-netview="${id}" class="seg ${id === this._netView ? "active" : ""}" aria-pressed="${id === this._netView}">${label}</button>`)
+      .join("");
+    const learning = net.learning_until
+      ? `<div class="note">Learning the baseline until ${fmtDateTime(net.learning_until)}. Destinations seen before then aren't flagged as new.</div>`
+      : "";
+    const body = this._netView === "24h" ? this._network24h(net) : this._networkNow(net);
+    return `<div class="segbar"><div class="segs" role="group" aria-label="Connections view">${views}</div></div>${learning}${body}`;
+  }
+
+  _integrationCell(name, fallback) {
+    return name
+      ? esc(this._integrationName(name))
+      : `<span class="muted" title="Not made through aiohttp, or from an add-on or the host">${esc(fallback || "Unattributed")}</span>`;
+  }
+
+  _networkNow(net) {
     const isNew = new Set(net.destinations_24h.filter((x) => x.new).map((x) => x.host));
     const rows = net.connections.map((c) => {
-      const host = c.hostname || c.remote_ip;
+      const host = c.traced_host || c.hostname || c.remote_ip;
+      const rdns = c.traced_host && c.hostname && c.hostname !== c.traced_host
+        ? `<div class="sub" title="Reverse DNS">${esc(c.hostname)}</div>` : "";
       return `
       <tr>
-        <td>${esc(c.hostname || "(no reverse DNS)")}</td>
+        <td>${c.traced_host || c.hostname ? esc(host) : `<span class="muted">(no reverse DNS)</span>`}${rdns}</td>
         <td class="mono">${esc(c.remote_ip)}:${esc(c.remote_port)}</td>
-        <td class="muted">${esc(c.process)}</td>
-        <td class="mono muted">${esc(c.local_port)}</td>
-        <td>${isNew.has(host) ? `<span class="chip new">First seen today</span>` : `<span class="chip">Known</span>`}</td>
+        <td>${this._integrationCell(c.integration, c.process ? `${c.process} · unattributed` : "Unattributed")}</td>
+        <td>${isNew.has(host) ? `<span class="chip new">New</span>` : `<span class="chip">Known</span>`}</td>
       </tr>`;
     }).join("");
     return `<table>
-      <thead><tr><th>Destination</th><th>Remote</th><th>Process</th><th>Local port</th><th>Seen</th></tr></thead>
-      <tbody>${rows || `<tr><td colspan="5" class="empty">No external connections right now.</td></tr>`}</tbody>
+      <thead><tr><th>Destination</th><th>Remote</th><th>Integration</th><th>Seen</th></tr></thead>
+      <tbody>${rows || `<tr><td colspan="4" class="empty">No external connections right now.</td></tr>`}</tbody>
     </table>
     <div class="foot">${plural(net.connections.length, "established connection", "established connections")} · ${plural(net.listening.length, "listening socket", "listening sockets")}</div>`;
+  }
+
+  _network24h(net) {
+    const rows = net.destinations_24h.map((x) => {
+      const activity = [
+        x.requests ? plural(x.requests, "request", "requests") : null,
+        x.connections ? plural(x.connections, "connection", "connections") : null,
+      ].filter(Boolean).join(" · ");
+      const integrations = x.integrations.length
+        ? x.integrations.map((i) => esc(this._integrationName(i))).join(", ")
+        : this._integrationCell(null);
+      return `
+      <tr>
+        <td>${esc(x.host)}${x.new ? ` <span class="chip new">New</span>` : ""}</td>
+        <td>${integrations}</td>
+        <td class="muted">${activity}</td>
+        <td class="muted">${fmtDateTime(x.first_seen)}</td>
+        <td class="muted">${x.last_seen ? `<span data-ago="${esc(x.last_seen)}">${ago(x.last_seen)}</span>` : "—"}</td>
+      </tr>`;
+    }).join("");
+    return `<table>
+      <thead><tr><th>Destination</th><th>Integration</th><th>Activity · 24 h</th><th>First seen</th><th>Last seen</th></tr></thead>
+      <tbody>${rows || `<tr><td colspan="5" class="empty">No outbound traffic recorded in the last 24 h.</td></tr>`}</tbody>
+    </table>
+    <div class="foot">Requests are counted by tracing Home Assistant's HTTP client. Connections come from the socket scan. Monitoring since ${fmtDateTime(net.monitoring_since)}.</div>`;
   }
 
   _tokensTable(d) {
     const rows = d.auth.tokens.map((t) => `
       <tr>
         <td>${esc(t.user)}</td>
-        <td>${esc(prettyClient(t.client_name))}</td>
+        <td>${esc(prettyClient(t.client_name, t.type === "long_lived_access_token" ? null : t.type))}</td>
         <td class="muted">${t.type === "long_lived_access_token" ? "Long-lived" : "Session"}</td>
         <td class="muted">${t.last_used_at ? `<span data-ago="${esc(t.last_used_at)}">${ago(t.last_used_at)}</span>` : "never"}</td>
         <td class="mono">${esc(t.last_used_ip)}</td>
@@ -296,17 +372,24 @@ class SecurityDashboardPanel extends HTMLElement {
 
   _destinations(d) {
     const dest = d.network ? d.network.destinations_24h.slice(0, 6) : [];
-    const max = Math.max(1, ...dest.map((x) => x.connections));
-    const rows = dest.map((x) => `
+    const max = Math.max(1, ...dest.map((x) => x.activity));
+    const rows = dest.map((x) => {
+      const who = x.integrations.length ? this._integrationName(x.integrations[0]) : "unattributed";
+      const unit = x.requests ? "requests" : "connections";
+      return `
       <div class="dest">
-        <div class="dest-row"><span class="dest-host" title="${esc(x.host)}">${esc(x.host)}${x.new ? ` <span class="new-tag">· new</span>` : ""}</span><span class="muted">${x.connections}</span></div>
-        <div class="track"><div class="fill" style="width:${Math.max(2, (x.connections / max) * 100)}%;background:${x.new ? C.medium : C.low}"></div></div>
-      </div>`).join("");
+        <div class="dest-row">
+          <span class="dest-host" title="${esc(x.host)}">${esc(x.host)}${x.new ? ` <span class="new-tag">· new</span>` : ""}</span>
+          <span class="muted" title="${x.requests} requests · ${x.connections} connections">${x.activity}</span>
+        </div>
+        <div class="track"><div class="fill" style="width:${Math.max(2, (x.activity / max) * 100)}%;background:${x.new ? C.medium : C.low}"></div></div>
+        <div class="sub">${esc(who)} · ${unit}</div>
+      </div>`;
+    }).join("");
     return `
       <section class="card" aria-label="Top destinations">
         <h2>Top destinations · 24 h</h2>
-        ${rows || `<div class="empty">No external connections seen yet.</div>`}
-        <div class="foot">Distinct connections per host since monitoring started, up to 24 h</div>
+        ${rows || `<div class="empty">No outbound traffic recorded yet.</div>`}
       </section>`;
   }
 
@@ -411,6 +494,13 @@ class SecurityDashboardPanel extends HTMLElement {
         .foot { font-size:12px; color:var(--secondary-text-color); padding:10px 16px 12px; }
         .side .foot { padding:12px 0 0; }
         .empty { padding:20px; text-align:center; color:var(--secondary-text-color); }
+        .segbar { padding:12px 16px 4px; }
+        .segs { display:inline-flex; border:1px solid var(--divider-color); border-radius:18px; overflow:hidden; }
+        .seg { min-height:36px; padding:0 14px; background:none; border:0; color:var(--secondary-text-color); font:inherit; font-size:13px; font-weight:500; cursor:pointer; }
+        .seg.active { background:color-mix(in srgb, var(--primary-color) 16%, transparent); color:var(--primary-color); }
+        .note { margin:8px 16px 4px; padding:8px 12px; border-radius:8px; font-size:12px; color:var(--secondary-text-color);
+          background:color-mix(in srgb, ${C.low} 10%, transparent); }
+        .dest .sub { margin-top:-2px; }
         .sr { position:absolute; width:1px; height:1px; overflow:hidden; clip:rect(0 0 0 0); }
       </style>
       ${this._header()}
@@ -425,6 +515,11 @@ class SecurityDashboardPanel extends HTMLElement {
     this.shadowRoot.querySelectorAll(".tabs button").forEach((b) =>
       b.addEventListener("click", () => {
         this._tab = b.dataset.tab;
+        this._render();
+      }));
+    this.shadowRoot.querySelectorAll("button[data-netview]").forEach((b) =>
+      b.addEventListener("click", () => {
+        this._netView = b.dataset.netview;
         this._render();
       }));
     this.shadowRoot.querySelector("a.repairs")?.addEventListener("click", (ev) => {

@@ -8,7 +8,7 @@
 > [!IMPORTANT]
 > This integration is not affiliated with the Home Assistant project or Nabu Casa and is provided as-is and without warranty. It helps you spot problems; it does not make your installation secure on its own.
 
-Adds an admin-only **Security** panel to the Home Assistant sidebar. It shows who
+Adds an admin-only **Security Monitor** panel to the Home Assistant sidebar. It shows who
 accessed your instance, which tokens are in use, which internet hosts Home
 Assistant talks to and which integration is behind each connection, together
 with a security score and concrete findings.
@@ -43,7 +43,7 @@ The **Connections** tab, **Last 24 h** view:
 2. Install **Security Dashboard** and restart Home Assistant.
 3. In **Settings > Devices & services > Add integration**, add **Security Dashboard**.
    There is nothing to configure.
-4. Open **Security** in the sidebar. The panel is only visible to administrators.
+4. Open **Security Monitor** in the sidebar. The panel is only visible to administrators.
 
 To install manually, copy `custom_components/security_dashboard` into the
 `custom_components` folder of your Home Assistant configuration and restart.
@@ -183,7 +183,7 @@ attribution against a local server, and persistence across a reload.
 
 ## Troubleshooting
 
-- **The Security panel does not appear.** The panel is only shown to
+- **The Security Monitor panel does not appear.** The panel is only shown to
   administrators. Check that the integration is set up under **Settings >
   Devices & services**.
 - **The panel shows an old version after an update.** Restart Home Assistant,

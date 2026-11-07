@@ -174,7 +174,7 @@ class SecurityDashboardPanel extends HTMLElement {
       <div class="toolbar">
         ${this._narrow ? `<ha-menu-button></ha-menu-button>` : ""}
         <svg class="shield" aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3 5 6v5c0 4.5 3 8.3 7 10 4-1.7 7-5.5 7-10V6l-7-3Z"></path><rect x="9.5" y="10.5" width="5" height="4.5" rx="1"></rect><path d="M10.5 10.5V9a1.5 1.5 0 0 1 3 0v1.5"></path></svg>
-        <h1>Security</h1>
+        <h1>Security Monitor</h1>
         <div class="toolbar-right">
           ${status}
           <button class="run" type="button" ${this._running || !d ? "disabled" : ""}>${this._running ? "Checking…" : "Run checks"}</button>

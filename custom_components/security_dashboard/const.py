@@ -9,7 +9,7 @@ DOMAIN: Final = "security_dashboard"
 
 # Frontend panel
 PANEL_URL_PATH: Final = "security-dashboard"
-PANEL_TITLE: Final = "Security"
+PANEL_TITLE: Final = "Security Monitor"
 PANEL_ICON: Final = "mdi:shield-lock-outline"
 PANEL_WEBCOMPONENT: Final = "security-dashboard-panel"
 STATIC_URL: Final = f"/{DOMAIN}_static"

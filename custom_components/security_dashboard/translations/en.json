@@ -3,7 +3,7 @@
     "step": {
       "user": {
         "title": "Security Dashboard",
-        "description": "Adds a Security panel to the sidebar (admins only) that shows access logs, token hygiene and outbound connections."
+        "description": "Adds a Security Monitor panel to the sidebar (admins only) that shows access logs, token hygiene and outbound connections."
       }
     },
     "abort": {

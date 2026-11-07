@@ -3,6 +3,8 @@
 import asyncio
 import importlib.util
 from pathlib import Path
+import socket
+import sys
 
 import aiohttp
 from pytest_homeassistant_custom_component.common import MockConfigEntry
@@ -136,14 +138,20 @@ async def test_hostname_from_dns_lookup(hass: HomeAssistant, socket_enabled):
         tracer.stop()
 
 
-async def test_own_lookups_and_stopped_tracer_are_ignored(hass: HomeAssistant, socket_enabled):
+async def test_own_lookups_and_stopped_tracer_are_ignored(hass: HomeAssistant, monkeypatch, socket_enabled):
     tracer = ConnectionTracer(hass)
     tracer.include_local = True
     tracer.start()
     server, port = await _start_server()
     try:
-        # Lookups made by the tracer itself don't count as traffic
-        await hass.async_add_executor_job(ConnectionTracer._resolve_all, ["security-monitor-test.invalid"])
+        # Lookups made by the tracer itself don't count as traffic. Stand-in for
+        # getaddrinfo: raises its audit event, then fails like an unknown name.
+        def _fake_getaddrinfo(host, *args, **kwargs):
+            sys.audit("socket.getaddrinfo", host, None, 0, 0, 0, 0)
+            raise socket.gaierror("unknown name")
+
+        monkeypatch.setattr(socket, "getaddrinfo", _fake_getaddrinfo)
+        assert await hass.async_add_executor_job(ConnectionTracer._resolve_all, ["security-monitor-test.invalid"]) == {}
         tracer.process_pending()
         assert "security-monitor-test.invalid" not in tracer._lookups
 

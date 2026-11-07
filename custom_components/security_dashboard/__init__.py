@@ -17,6 +17,7 @@ from homeassistant.const import Platform
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers import config_validation as cv
 from homeassistant.helpers.typing import ConfigType
+from homeassistant.loader import async_get_integration
 
 from . import websocket_api
 from .auth_monitor import AuthMonitor
@@ -72,14 +73,16 @@ async def async_setup_entry(hass: HomeAssistant, entry: SecurityConfigEntry) -> 
 
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
 
-    # Bundled dashboard: an admin-only sidebar panel backed by our web component
+    # Bundled dashboard: an admin-only sidebar panel backed by our web component.
+    # The version in the module URL makes browsers fetch the new JS after an update.
+    version = (await async_get_integration(hass, DOMAIN)).version
     await panel_custom.async_register_panel(
         hass,
         frontend_url_path=PANEL_URL_PATH,
         webcomponent_name=PANEL_WEBCOMPONENT,
         sidebar_title=PANEL_TITLE,
         sidebar_icon=PANEL_ICON,
-        module_url=f"{STATIC_URL}/{PANEL_JS}?v={entry.entry_id[:8]}",
+        module_url=f"{STATIC_URL}/{PANEL_JS}?v={version}",
         require_admin=True,
         config={"entry_id": entry.entry_id},
     )

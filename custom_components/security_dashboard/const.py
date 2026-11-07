@@ -28,6 +28,7 @@ WS_OVERVIEW: Final = f"{DOMAIN}/overview"
 WS_AUTH_LOG: Final = f"{DOMAIN}/auth_log"
 WS_CONNECTIONS: Final = f"{DOMAIN}/connections"
 WS_SUBSCRIBE: Final = f"{DOMAIN}/subscribe"
+WS_RUN_CHECKS: Final = f"{DOMAIN}/run_checks"
 
 # Dispatcher signal fired whenever new auth events or scan results arrive
 SIGNAL_UPDATED: Final = f"{DOMAIN}_updated"

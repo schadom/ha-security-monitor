@@ -9,7 +9,7 @@ Two sources:
 
 from __future__ import annotations
 
-from collections import deque
+from collections import Counter, deque
 from dataclasses import asdict, dataclass
 from datetime import timedelta
 import logging
@@ -169,16 +169,38 @@ class AuthMonitor:
                 and (last is None or last < stale_cutoff)
             )
 
+        # Failed logins: last 24 h plus 24 hourly buckets aligned to clock hours
+        # (bucket 23 = the current, partial hour) for the chart.
         day_ago = now - timedelta(hours=24)
-        failed_24h = sum(
-            1
-            for e in self.events
-            if e.kind in ("failed_login", "banned")
-            and dt_util.parse_datetime(e.timestamp) > day_ago
-        )
+        hourly_start = now.replace(minute=0, second=0, microsecond=0) - timedelta(hours=23)
+        hourly = [0] * 24
+        failed_24h = 0
+        sources: Counter[str] = Counter()
+        banned_ips: set[str] = set()
+        for e in self.events:
+            ts = dt_util.parse_datetime(e.timestamp)
+            if ts is None:
+                continue
+            if e.kind == "banned" and ts > day_ago and e.ip:
+                banned_ips.add(e.ip)
+            if e.kind != "failed_login":
+                continue
+            if ts > day_ago:
+                failed_24h += 1
+                if e.ip:
+                    sources[e.ip] += 1
+            if ts >= hourly_start:
+                hourly[min(23, int((ts - hourly_start).total_seconds() // 3600))] += 1
+
+        top = sources.most_common(1)
         return {
             "users": users,
             "tokens": tokens,
             "failed_logins_24h": failed_24h,
+            "failed_sources_24h": len(sources),
+            "banned_24h": len(banned_ips),
+            "top_source_24h": {"ip": top[0][0], "count": top[0][1]} if top else None,
+            "failed_hourly": hourly,
+            "failed_hourly_start": hourly_start.isoformat(),
             "events": [asdict(e) for e in list(self.events)[:200]],
         }

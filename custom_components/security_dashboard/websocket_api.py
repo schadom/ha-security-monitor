@@ -13,20 +13,27 @@ from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers.dispatcher import async_dispatcher_connect
 
 from .checks import async_run_checks, score_from_findings
-from .const import DOMAIN, SIGNAL_UPDATED, WS_OVERVIEW, WS_SUBSCRIBE
+from .const import DOMAIN, SIGNAL_UPDATED, WS_OVERVIEW, WS_RUN_CHECKS, WS_SUBSCRIBE
+from .repairs import async_check_issues
 
 
 @callback
 def async_register(hass: HomeAssistant) -> None:
     websocket_api.async_register_command(hass, ws_overview)
     websocket_api.async_register_command(hass, ws_subscribe)
+    websocket_api.async_register_command(hass, ws_run_checks)
+
+
+def _loaded_entry(hass: HomeAssistant):
+    for entry in hass.config_entries.async_entries(DOMAIN):
+        if entry.state is ConfigEntryState.LOADED:
+            return entry
+    return None
 
 
 def _runtime(hass: HomeAssistant):
-    for entry in hass.config_entries.async_entries(DOMAIN):
-        if entry.state is ConfigEntryState.LOADED:
-            return entry.runtime_data
-    return None
+    entry = _loaded_entry(hass)
+    return entry.runtime_data if entry else None
 
 
 async def _build_overview(hass: HomeAssistant) -> dict[str, Any] | None:
@@ -79,3 +86,19 @@ def ws_subscribe(
     )
     connection.send_result(msg["id"])
     hass.async_create_task(_push())
+
+
+@websocket_api.require_admin
+@websocket_api.websocket_command({vol.Required("type"): WS_RUN_CHECKS})
+@websocket_api.async_response
+async def ws_run_checks(
+    hass: HomeAssistant, connection: websocket_api.ActiveConnection, msg: dict[str, Any]
+) -> None:
+    """Rescan connections, re-run checks and refresh Repairs now."""
+    entry = _loaded_entry(hass)
+    if entry is None:
+        connection.send_error(msg["id"], "not_loaded", "Security Dashboard is not set up")
+        return
+    await entry.runtime_data.network.async_refresh()  # fires SIGNAL_UPDATED → subscribers get fresh data
+    await async_check_issues(hass, entry)
+    connection.send_result(msg["id"], await _build_overview(hass))

@@ -1,0 +1,33 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Security Dashboard",
+        "description": "Adds a Security panel to the sidebar (admins only) that shows access logs, token hygiene and outbound connections."
+      }
+    },
+    "abort": {
+      "single_instance_allowed": "Security Dashboard is already set up."
+    }
+  },
+  "entity": {
+    "sensor": {
+      "outbound_connections": { "name": "Outbound connections" },
+      "failed_logins_24h": { "name": "Failed logins (24h)" }
+    }
+  },
+  "issues": {
+    "ip_ban_disabled": {
+      "title": "IP banning is disabled",
+      "description": "Repeated failed logins are never blocked. Add `ip_ban_enabled: true` and `login_attempts_threshold` to the `http:` section of configuration.yaml."
+    },
+    "external_http": {
+      "title": "Remote access without HTTPS",
+      "description": "Your external URL uses plain HTTP, so passwords and tokens travel unencrypted. Use Home Assistant Cloud, a reverse proxy with TLS, or configure `ssl_certificate`."
+    },
+    "stale_tokens": {
+      "title": "Unused long-lived access tokens",
+      "description": "Some long-lived access tokens haven't been used in 90 days. Revoke the ones you no longer need under your profile → Security."
+    }
+  }
+}

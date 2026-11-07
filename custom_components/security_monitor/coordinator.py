@@ -5,12 +5,12 @@ Uses psutil.net_connections(). Visibility depends on the install type:
   so you see host-wide sockets, but PID → process mapping is limited to the
   Core container. Add-on traffic shows up without an owner.
 - Container: only what the container's network namespace sees.
-- Short-lived connections between polls are missed. The HTTP tracer covers
-  most of those for aiohttp traffic; for everything else pair this with a
-  companion add-on (conntrack) or DNS logs from Pi-hole/AdGuard.
+- Short-lived connections between polls are missed by the scan, but the
+  connection tracer counts every connection made by Home Assistant Core. Add-on
+  and host traffic needs a companion add-on (conntrack) or DNS logs.
 
-Each socket is labelled with the hostname and integration the HTTP tracer saw
-for its peer IP, falling back to reverse DNS.
+Each socket is labelled with the hostname and integration the connection
+tracer saw for its peer IP, falling back to reverse DNS.
 """
 
 from __future__ import annotations
@@ -34,7 +34,7 @@ from .const import DOMAIN, NETWORK_SCAN_INTERVAL, SIGNAL_UPDATED
 
 if TYPE_CHECKING:
     from . import SecurityConfigEntry
-    from .http_tracer import HttpTracer
+    from .connection_tracer import ConnectionTracer
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -55,6 +55,7 @@ class NetworkSnapshot:
     new_destinations_24h: int = 0
     monitoring_since: str | None = None
     learning_until: str | None = None
+    tracing: dict[str, bool] = field(default_factory=dict)
 
     @property
     def outbound_count(self) -> int:
@@ -116,7 +117,7 @@ class NetworkCoordinator(DataUpdateCoordinator[NetworkSnapshot]):
         self,
         hass: HomeAssistant,
         entry: SecurityConfigEntry,
-        tracer: HttpTracer,
+        tracer: ConnectionTracer,
         restored: dict[str, Any] | None = None,
     ) -> None:
         super().__init__(
@@ -161,6 +162,7 @@ class NetworkCoordinator(DataUpdateCoordinator[NetworkSnapshot]):
         now = dt_util.utcnow()
         now_iso = now.isoformat()
         day_ago = now - timedelta(hours=24)
+        self.tracer.process_pending()
         self.tracer.prune()
 
         for c in snapshot.connections:
@@ -183,7 +185,7 @@ class NetworkCoordinator(DataUpdateCoordinator[NetworkSnapshot]):
             merged[t["host"]] = {
                 "host": t["host"],
                 "requests": t["requests"],
-                "connections": 0,
+                "connections": t["connections"],
                 "integrations": t["integrations"],
                 "first_seen": t["first_seen"],
                 "last_seen": t["last_seen"],
@@ -200,7 +202,8 @@ class NetworkCoordinator(DataUpdateCoordinator[NetworkSnapshot]):
                 {"host": host, "requests": 0, "connections": 0, "integrations": [],
                  "first_seen": seen.get("first_seen"), "last_seen": seen.get("last_seen")},
             )
-            item["connections"] = count
+            # Traced connects are exact; the scan adds sockets opened before tracing
+            item["connections"] = max(item["connections"], count)
             if not item["integrations"] and host in integration_per_host:
                 item["integrations"] = [integration_per_host[host]]
             # Earliest first sighting / latest last sighting across both sources
@@ -224,11 +227,14 @@ class NetworkCoordinator(DataUpdateCoordinator[NetworkSnapshot]):
         snapshot.destinations_24h = destinations
         snapshot.new_destinations_24h = sum(1 for d in destinations if d["new"])
         snapshot.monitoring_since = self.monitoring_since.isoformat()
+        snapshot.tracing = dict(self.tracer.capabilities)
         learning_until = self.monitoring_since + LEARNING_PERIOD
         snapshot.learning_until = learning_until.isoformat() if learning_until > now else None
 
     async def _async_update_data(self) -> NetworkSnapshot:
         snapshot = await self.hass.async_add_executor_job(_scan, self._rdns_cache)
+        self.tracer.process_pending()
+        await self.tracer.async_enrich()
         self._track(snapshot)
         # Piggy-back token-usage polling on the same timer
         if (data := getattr(self.config_entry, "runtime_data", None)) is not None:

@@ -430,7 +430,7 @@ class SecurityMonitorPanel extends HTMLElement {
   _integrationCell(name, fallback) {
     return name
       ? esc(this._integrationName(name))
-      : `<span class="muted" title="Not made through aiohttp, or from an add-on or the host">${esc(fallback || "Unattributed")}</span>`;
+      : `<span class="muted" title="From an add-on or the host, or opened before monitoring started">${esc(fallback || "Unattributed")}</span>`;
   }
 
   _networkNow(net) {
@@ -479,7 +479,7 @@ class SecurityMonitorPanel extends HTMLElement {
       ${this._thead("24h")}
       <tbody>${rows || `<tr><td colspan="5" class="empty">No outbound traffic recorded in the last 24 h.</td></tr>`}</tbody>
     </table>${pager}
-    <div class="foot">Requests are counted by tracing Home Assistant's HTTP client. Connections come from the socket scan. Monitoring since ${fmtDateTime(net.monitoring_since)}.</div>`;
+    <div class="foot">Connections from Home Assistant Core are attributed for every library. Requests and exact hostnames come from Home Assistant's HTTP client.${net.tracing && net.tracing.aiohttp === false ? " HTTP client tracing is unavailable on this version, so some hostnames come from DNS lookups or reverse DNS." : ""} Monitoring since ${fmtDateTime(net.monitoring_since)}.</div>`;
   }
 
   _tokensTable(d) {

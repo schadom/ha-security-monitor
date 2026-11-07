@@ -34,7 +34,7 @@ from .const import (
     STATIC_URL,
 )
 from .coordinator import NetworkCoordinator
-from .http_tracer import HttpTracer
+from .connection_tracer import ConnectionTracer
 from .repairs import async_check_issues
 from .storage import HistoryStore
 
@@ -48,7 +48,7 @@ class SecurityData:
 
     auth: AuthMonitor
     network: NetworkCoordinator
-    tracer: HttpTracer
+    tracer: ConnectionTracer
     store: HistoryStore
 
 
@@ -75,8 +75,8 @@ async def async_setup_entry(hass: HomeAssistant, entry: SecurityConfigEntry) -> 
     auth = AuthMonitor(hass, restored.get("auth"))
     await auth.async_start()
 
-    # Attribute outbound HTTP traffic to integrations (wraps aiohttp once)
-    tracer = HttpTracer(hass, restored.get("http"))
+    # Attribute outbound connections to integrations (audit hook + aiohttp layer)
+    tracer = ConnectionTracer(hass, restored.get("http"))
     tracer.start()
 
     network = NetworkCoordinator(hass, entry, tracer, restored.get("network"))

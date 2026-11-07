@@ -59,6 +59,8 @@ async def test_full_flow(hass: HomeAssistant, hass_ws_client, hass_client, hass_
     assert msg["success"], msg
     res = msg["result"]
     print("score:", res["score"], "findings:", [f["id"] for f in res["findings"]])
+    # Each finding carries a translation key and its parameters for the panel
+    assert all(f["key"] and isinstance(f["params"], dict) for f in res["findings"])
     print("events:", res["auth"]["events"])
     print("users:", res["auth"]["users"])
     ev = res["auth"]["events"]

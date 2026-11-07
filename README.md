@@ -191,6 +191,17 @@ Home Assistant log formats, the 24-hour destination history, attribution of
 aiohttp, plain-socket, asyncio and background-task connections against a local
 server, hostname lookup, and persistence across a reload.
 
+## Releasing
+
+1. Bump `version` in `custom_components/security_monitor/manifest.json` in the
+   pull request that contains the change.
+2. After merging, publish a GitHub release whose tag is that version with a
+   `v` prefix, e.g. `v0.5.2` for version `0.5.2`.
+
+The **Release check** workflow compares the tag with the manifest version when
+a release is published. If they don't match, it sets the release back to
+draft, so HACS doesn't offer it, and explains how to fix it.
+
 ## Known limitations
 
 - **Private APIs.** The integration relies on parts of Home Assistant and

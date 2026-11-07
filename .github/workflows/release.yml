@@ -1,0 +1,47 @@
+name: Release check
+on:
+  release:
+    types: [published]
+permissions:
+  contents: write  # to set a mismatched release back to draft
+jobs:
+  version:
+    name: Tag matches manifest version
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.release.tag_name }}
+      - name: Compare release tag with manifest version
+        id: compare
+        env:
+          TAG: ${{ github.event.release.tag_name }}
+        run: |
+          manifest=$(jq -r .version custom_components/security_monitor/manifest.json)
+          expected="v${manifest}"
+          echo "Release tag: $TAG, manifest version: $manifest"
+          if [ "$TAG" != "$expected" ]; then
+            echo "mismatch=true" >> "$GITHUB_OUTPUT"
+            echo "expected=$expected" >> "$GITHUB_OUTPUT"
+            echo "::error title=Version mismatch::Release tag $TAG doesn't match the manifest version $manifest (expected tag $expected)."
+            exit 1
+          fi
+          echo "Release tag $TAG matches the manifest version $manifest." >> "$GITHUB_STEP_SUMMARY"
+      # GitHub can't block publishing; take the release back down instead.
+      # HACS only offers published releases, so users won't be offered it.
+      - name: Set the release back to draft
+        if: failure() && steps.compare.outputs.mismatch == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          RELEASE_ID: ${{ github.event.release.id }}
+          TAG: ${{ github.event.release.tag_name }}
+          EXPECTED: ${{ steps.compare.outputs.expected }}
+        run: |
+          gh api -X PATCH "repos/$REPO/releases/$RELEASE_ID" -F draft=true --silent
+          echo "::error title=Release set back to draft::Fix the manifest version or the tag, then publish again."
+          {
+            echo "Release **$TAG** was set back to **draft**: its tag doesn't match the manifest version."
+            echo ""
+            echo "Either bump the version in \`manifest.json\` via a PR and publish again, or publish with tag **$EXPECTED**."
+          } >> "$GITHUB_STEP_SUMMARY"

@@ -213,3 +213,31 @@ async def test_dismissed_findings_leave_repairs(hass: HomeAssistant, hass_ws_cli
     assert (await client.receive_json())["success"]
     entry = hass.config_entries.async_entries(DOMAIN)[0]
     assert "stale_tokens" not in entry.runtime_data.dismissed
+
+
+async def test_mfa_support_without_support_mfa_property(hass: HomeAssistant, monkeypatch):
+    """HA 2026.11 removed AuthProvider.support_mfa; setup must not depend on it."""
+    from types import SimpleNamespace
+
+    from custom_components.security_monitor.auth_monitor import AuthMonitor
+
+    monitor = AuthMonitor(hass)
+    password = Credentials(auth_provider_type="homeassistant", auth_provider_id=None, data={})
+    trusted = Credentials(auth_provider_type="trusted_networks", auth_provider_id=None, data={})
+
+    # 2026.11+: providers without the property → decided by provider type
+    monkeypatch.setattr(hass.auth, "get_auth_provider", lambda *_: SimpleNamespace(type="x"))
+    assert monitor._supports_mfa(password)
+    assert not monitor._supports_mfa(trusted)
+
+    # Up to 2026.10: the property wins
+    monkeypatch.setattr(hass.auth, "get_auth_provider", lambda *_: SimpleNamespace(support_mfa=False))
+    assert not monitor._supports_mfa(password)
+
+    # A broken lookup never raises
+    def boom(*_):
+        raise RuntimeError("internal API moved")
+
+    monkeypatch.setattr(hass.auth, "get_auth_provider", boom)
+    assert monitor._supports_mfa(password)
+    assert not monitor._supports_mfa(trusted)

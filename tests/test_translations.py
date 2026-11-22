@@ -75,10 +75,10 @@ def test_panel_uses_only_known_keys():
 
 def test_every_finding_has_panel_texts():
     translations, _code = _panel_translations()
-    checks = (INTEGRATION / "checks.py").read_text(encoding="utf-8")
-    keys = set(re.findall(r'^\s+"([a-z_]+)"(?:,\s*\{.*\})?\)\s*$', checks, re.MULTILINE))
-    assert keys >= {"no_mfa", "stale_tokens", "ip_ban_disabled", "external_http", "login_burst", "custom_components"}
-    for key in keys:
+    # test_checks.py makes sure every finding the checks produce uses one of these keys
+    from custom_components.security_monitor.checks import FINDING_KEYS
+
+    for key in FINDING_KEYS:
         for part in ("title", "detail"):
             assert f"finding.{key}.{part}" in translations["en"], f"finding.{key}.{part} missing"
     for kind in ("failed_login", "banned", "token_used"):

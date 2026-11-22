@@ -7,7 +7,7 @@ from typing import TYPE_CHECKING
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers import issue_registry as ir
 
-from .checks import async_run_checks
+from .checks import async_run_checks, split_dismissed
 from .const import DOMAIN
 
 if TYPE_CHECKING:
@@ -19,7 +19,9 @@ REPAIRABLE = {"ip_ban_disabled", "external_http", "stale_tokens"}
 
 async def async_check_issues(hass: HomeAssistant, entry: SecurityConfigEntry) -> None:
     auth = await entry.runtime_data.auth.async_snapshot()
-    findings = {f["id"]: f for f in await async_run_checks(hass, auth)}
+    # Findings the user dismissed in the panel don't get a Repairs issue either
+    open_findings, _ = split_dismissed(await async_run_checks(hass, auth), entry.runtime_data.dismissed)
+    findings = {f["id"]: f for f in open_findings}
 
     for issue_id in REPAIRABLE:
         if issue_id in findings:

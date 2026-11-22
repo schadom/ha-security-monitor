@@ -7,7 +7,7 @@ panel that renders the dashboard.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import timedelta
 from pathlib import Path
 
@@ -50,6 +50,8 @@ class SecurityData:
     network: NetworkCoordinator
     tracer: ConnectionTracer
     store: HistoryStore
+    # Finding ID -> {"params": params when dismissed, "dismissed_at": iso}
+    dismissed: dict[str, dict] = field(default_factory=dict)
 
 
 type SecurityConfigEntry = ConfigEntry[SecurityData]
@@ -80,15 +82,24 @@ async def async_setup_entry(hass: HomeAssistant, entry: SecurityConfigEntry) -> 
     tracer.start()
 
     network = NetworkCoordinator(hass, entry, tracer, restored.get("network"))
-    entry.runtime_data = SecurityData(auth=auth, network=network, tracer=tracer, store=store)
+    entry.runtime_data = SecurityData(
+        auth=auth, network=network, tracer=tracer, store=store,
+        dismissed=dict(restored.get("dismissed", {})),
+    )
     await network.async_config_entry_first_refresh()
 
     entry.async_on_unload(auth.async_stop)
     entry.async_on_unload(tracer.stop)
 
-    # Persist access log + destination history every 5 min and on shutdown
+    # Persist access log, destination history and dismissed findings every 5 min and on shutdown
+    data = entry.runtime_data
     store.async_start(
-        lambda: {"auth": auth.as_dict(), "network": network.as_dict(), "http": tracer.as_dict()}
+        lambda: {
+            "auth": auth.as_dict(),
+            "network": network.as_dict(),
+            "http": tracer.as_dict(),
+            "dismissed": data.dismissed,
+        }
     )
 
     # Map library packages → integrations once everything has loaded, then every 6 h

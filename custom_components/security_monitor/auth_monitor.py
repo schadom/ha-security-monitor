@@ -16,7 +16,7 @@ import logging
 import re
 from typing import Any
 
-from homeassistant.auth.models import TOKEN_TYPE_LONG_LIVED_ACCESS_TOKEN
+from homeassistant.auth.models import TOKEN_TYPE_LONG_LIVED_ACCESS_TOKEN, TOKEN_TYPE_NORMAL, User
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers.dispatcher import async_dispatcher_send
 from homeassistant.util import dt as dt_util
@@ -151,6 +151,19 @@ class AuthMonitor:
                     )
                 )
 
+    def _has_mfa_capable_login(self, user: User) -> bool:
+        """Whether the user can sign in with a login that MFA would protect.
+
+        Users without credentials (created without a login) can't sign in at all,
+        and trusted networks don't support MFA. An unknown provider counts as
+        capable, to stay on the cautious side.
+        """
+        for cred in user.credentials:
+            provider = self.hass.auth.get_auth_provider(cred.auth_provider_type, cred.auth_provider_id)
+            if provider is None or provider.support_mfa:
+                return True
+        return False
+
     async def async_snapshot(self) -> dict[str, Any]:
         """Everything the panel needs about users and tokens."""
         now = dt_util.utcnow()
@@ -160,13 +173,26 @@ class AuthMonitor:
             if user.system_generated:
                 continue
             mfa = await self.hass.auth.async_get_enabled_mfa(user)
+            password_login = self._has_mfa_capable_login(user)
+            token_types = {tok.token_type for tok in user.refresh_tokens.values()}
             users.append(
                 {
+                    "id": user.id,
                     "name": user.name,
                     "is_owner": user.is_owner,
                     "is_admin": user.is_admin,
                     "is_active": user.is_active,
+                    "local_only": user.local_only,
                     "mfa_enabled": bool(mfa),
+                    "password_login": password_login,
+                    # Only long-lived tokens, no app or browser session: a device or
+                    # tool account. HA drops unused sessions after 90 days, so an
+                    # account used once to create its token is detected after that.
+                    "service_account": TOKEN_TYPE_LONG_LIVED_ACCESS_TOKEN in token_types
+                    and TOKEN_TYPE_NORMAL not in token_types,
+                    # Local-only users without admin rights can't be reached from
+                    # the internet and have limited rights, so MFA adds little.
+                    "mfa_applies": password_login and (user.is_admin or not user.local_only),
                 }
             )
 

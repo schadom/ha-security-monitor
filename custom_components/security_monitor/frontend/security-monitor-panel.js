@@ -40,8 +40,8 @@ const TRANSLATIONS = /* translations:start */ {
     "tile.tokens.none": "None unused for 90+ days",
     "tile.mfa.label": "Users without MFA",
     "tile.mfa.sub": {
-      "one": "of {count} active user",
-      "other": "of {count} active users"
+      "one": "of {count} user with a password login",
+      "other": "of {count} users with a password login"
     },
     "chart.title": "Failed logins · last 24 h",
     "chart.none": "No failed logins in the last 24 h",
@@ -147,11 +147,27 @@ const TRANSLATIONS = /* translations:start */ {
     "findings.title": "Findings",
     "findings.empty": "No findings. Nice.",
     "findings.repairs": "Open in Settings › Repairs",
+    "findings.dismiss": "Dismiss",
+    "findings.dismiss_hint": "Accept this finding: hide it and leave it out of the score",
+    "findings.restore": "Restore",
+    "findings.show_dismissed": {
+      "one": "Show {count} dismissed finding",
+      "other": "Show {count} dismissed findings"
+    },
+    "findings.hide_dismissed": "Hide dismissed findings",
+    "findings.dismissed_note": "Dismissed findings don't count toward the score. They come back if something changes, for example one more stale token.",
+    "findings.all_dismissed": "No open findings.",
     "sev.high": "High",
     "sev.medium": "Med",
     "sev.low": "Low",
     "finding.no_mfa.title": "{user} has no MFA",
     "finding.no_mfa.detail": "Enable TOTP under the user's profile → Security.",
+    "finding.service_account.title": "Service account {user} can log in with a password",
+    "finding.service_account.detail": "It only uses long-lived tokens. Make it local-only or set a long random password.",
+    "finding.service_account_admin.title": "Admin service account {user} can log in with a password",
+    "finding.service_account_admin.detail": "Remove admin rights if the tool using it doesn't need them, and make it local-only.",
+    "finding.service_account_admin_local.title": "Admin service account {user} can log in with a password",
+    "finding.service_account_admin_local.detail": "Remove admin rights if the tool using it doesn't need them.",
     "finding.stale_tokens.title": {
       "one": "{count} unused long-lived token",
       "other": "{count} unused long-lived tokens"
@@ -216,8 +232,8 @@ const TRANSLATIONS = /* translations:start */ {
     "tile.tokens.none": "Keines seit über 90 Tagen ungenutzt",
     "tile.mfa.label": "Benutzer ohne MFA",
     "tile.mfa.sub": {
-      "one": "von {count} aktiven Benutzer",
-      "other": "von {count} aktiven Benutzern"
+      "one": "von {count} Benutzer mit Passwort-Anmeldung",
+      "other": "von {count} Benutzern mit Passwort-Anmeldung"
     },
     "chart.title": "Fehlgeschlagene Anmeldungen · letzte 24 h",
     "chart.none": "Keine fehlgeschlagenen Anmeldungen in den letzten 24 h",
@@ -323,11 +339,27 @@ const TRANSLATIONS = /* translations:start */ {
     "findings.title": "Befunde",
     "findings.empty": "Keine Befunde. Sehr gut.",
     "findings.repairs": "In Einstellungen › Reparaturen öffnen",
+    "findings.dismiss": "Ausblenden",
+    "findings.dismiss_hint": "Befund bewusst akzeptieren: ausblenden und nicht in den Score einrechnen",
+    "findings.restore": "Wiederherstellen",
+    "findings.show_dismissed": {
+      "one": "{count} ausgeblendeten Befund anzeigen",
+      "other": "{count} ausgeblendete Befunde anzeigen"
+    },
+    "findings.hide_dismissed": "Ausgeblendete Befunde verbergen",
+    "findings.dismissed_note": "Ausgeblendete Befunde zählen nicht zum Score. Sie erscheinen wieder, wenn sich etwas ändert, zum Beispiel bei einem weiteren ungenutzten Token.",
+    "findings.all_dismissed": "Keine offenen Befunde.",
     "sev.high": "Hoch",
     "sev.medium": "Mittel",
     "sev.low": "Niedrig",
     "finding.no_mfa.title": "{user} hat keine MFA",
     "finding.no_mfa.detail": "Aktiviere TOTP im Profil des Benutzers unter Sicherheit.",
+    "finding.service_account.title": "Dienstkonto {user} kann sich mit Passwort anmelden",
+    "finding.service_account.detail": "Es verwendet nur langlebige Zugriffstoken. Beschränke es auf das lokale Netzwerk oder setze ein langes, zufälliges Passwort.",
+    "finding.service_account_admin.title": "Admin-Dienstkonto {user} kann sich mit Passwort anmelden",
+    "finding.service_account_admin.detail": "Entferne die Administratorrechte, wenn das Tool sie nicht braucht, und beschränke das Konto auf das lokale Netzwerk.",
+    "finding.service_account_admin_local.title": "Admin-Dienstkonto {user} kann sich mit Passwort anmelden",
+    "finding.service_account_admin_local.detail": "Entferne die Administratorrechte, wenn das Tool sie nicht braucht.",
     "finding.stale_tokens.title": {
       "one": "{count} ungenutztes langlebiges Zugriffstoken",
       "other": "{count} ungenutzte langlebige Zugriffstoken"
@@ -506,6 +538,8 @@ class SecurityMonitorPanel extends HTMLElement {
       if (PAGE_SIZES.includes(saved)) this._pageSize = saved;
     } catch (_) { /* storage unavailable: use the default */ }
     this._running = false;
+    this._showDismissed = false;
+    this._busyFinding = null;
   }
 
   // HA calls this on every state change, so it must stay cheap: no re-render here
@@ -582,6 +616,23 @@ class SecurityMonitorPanel extends HTMLElement {
     this._render();
   }
 
+  // Dismiss or restore a finding; the reply is a fresh overview
+  async _setDismissed(findingId, dismiss) {
+    if (this._busyFinding) return;
+    this._busyFinding = findingId;
+    this._render();
+    try {
+      this._data = await this._hass.callWS({
+        type: dismiss ? "security_monitor/dismiss_finding" : "security_monitor/restore_finding",
+        finding_id: findingId,
+      });
+    } catch (err) {
+      this._error = err.message || String(err);
+    }
+    this._busyFinding = null;
+    this._render();
+  }
+
   _navigate(path) {
     history.pushState(null, "", path);
     window.dispatchEvent(new CustomEvent("location-changed", { detail: { replace: false } }));
@@ -613,7 +664,8 @@ class SecurityMonitorPanel extends HTMLElement {
     const net = d.network;
     const llat = a.tokens.filter((tok) => tok.type === "long_lived_access_token");
     const stale = llat.filter((tok) => tok.stale).length;
-    const active = a.users.filter((u) => u.is_active);
+    // Only users MFA would protect: not token-only, trusted-networks-only or local-only non-admins
+    const active = a.users.filter((u) => u.is_active && u.mfa_applies !== false);
     const noMfa = active.filter((u) => !u.mfa_enabled).length;
     const high = d.findings.filter((f) => f.severity === "high").length;
     const scoreColor = d.score >= 80 ? C.ok : d.score >= 50 ? C.medium : C.high;
@@ -896,18 +948,43 @@ class SecurityMonitorPanel extends HTMLElement {
     return t(key, params);
   }
 
+  _findingRow(f, dismissed) {
+    const busy = this._busyFinding === f.id;
+    const action = dismissed
+      ? `<button type="button" class="link" data-restore="${esc(f.id)}" ${busy ? "disabled" : ""}>${t("findings.restore")}</button>`
+      : f.dismissible
+        ? `<button type="button" class="link" data-dismiss="${esc(f.id)}" title="${t("findings.dismiss_hint")}" ${busy ? "disabled" : ""}>${t("findings.dismiss")}</button>`
+        : "";
+    return `
+      <div class="finding${dismissed ? " dismissed" : ""}">
+        <span class="sev ${esc(f.severity)}">${TRANSLATIONS.en[`sev.${f.severity}`] ? t(`sev.${f.severity}`) : esc(f.severity)}</span>
+        <div class="fbody">
+          <div class="ftitle">${f.key ? this._findingText(f, "title") : esc(f.title)}</div>
+          <div class="sub">${f.key ? this._findingText(f, "detail") : esc(f.detail)}</div>
+          ${action}
+        </div>
+      </div>`;
+  }
+
   _findings(d) {
+    const hidden = d.dismissed_findings || [];
     const list = d.findings.length
-      ? d.findings.map((f) => `
-          <div class="finding">
-            <span class="sev ${esc(f.severity)}">${TRANSLATIONS.en[`sev.${f.severity}`] ? t(`sev.${f.severity}`) : esc(f.severity)}</span>
-            <div><div class="ftitle">${f.key ? this._findingText(f, "title") : esc(f.title)}</div><div class="sub">${f.key ? this._findingText(f, "detail") : esc(f.detail)}</div></div>
-          </div>`).join("")
-      : `<div class="empty">${t("findings.empty")}</div>`;
+      ? d.findings.map((f) => this._findingRow(f, false)).join("")
+      : `<div class="empty">${hidden.length ? t("findings.all_dismissed") : t("findings.empty")}</div>`;
+    const dismissed = hidden.length ? `
+        <button type="button" class="link toggle" data-toggle-dismissed aria-expanded="${this._showDismissed}">
+          ${this._showDismissed ? t("findings.hide_dismissed") : t("findings.show_dismissed", { count: hidden.length })}
+        </button>
+        ${this._showDismissed ? `
+          <div class="dismissed-list">
+            <div class="note-small">${t("findings.dismissed_note")}</div>
+            ${hidden.map((f) => this._findingRow(f, true)).join("")}
+          </div>` : ""}` : "";
     return `
       <section class="card" aria-label="${t("findings.title")}">
         <h2>${t("findings.title")}</h2>
         ${list}
+        ${dismissed}
         <a class="repairs" href="/config/repairs">${t("findings.repairs")}</a>
       </section>`;
   }
@@ -1027,6 +1104,15 @@ class SecurityMonitorPanel extends HTMLElement {
         .sev.medium { background:${C.medium}; }
         .sev.low { background:${C.low}; color:#fff; }
         .ftitle { font-weight:500; margin-bottom:2px; }
+        .fbody { min-width:0; flex:1; }
+        button.link { display:inline-flex; align-items:center; min-height:32px; padding:0; border:0; background:none; cursor:pointer;
+          color:var(--primary-color); font:inherit; font-size:13px; font-weight:500; }
+        button.link[disabled] { opacity:.5; cursor:default; }
+        button.link:focus-visible { outline:2px solid var(--primary-color); outline-offset:2px; border-radius:3px; }
+        button.link.toggle { display:flex; margin-top:4px; border-top:1px solid var(--divider-color); width:100%; padding-top:6px; min-height:40px; }
+        .finding.dismissed .sev { opacity:.55; }
+        .finding.dismissed .ftitle { color:var(--secondary-text-color); }
+        .note-small { font-size:12px; color:var(--secondary-text-color); padding:4px 0 8px; }
         a.repairs { display:inline-flex; align-items:center; min-height:44px; color:var(--primary-color); font-weight:500; font-size:13px; }
         .dest { display:flex; flex-direction:column; gap:6px; margin-top:10px; }
         .dest-row { display:flex; justify-content:space-between; gap:12px; font-size:13px; }
@@ -1109,6 +1195,14 @@ class SecurityMonitorPanel extends HTMLElement {
         this._netView = b.dataset.netview;
         this._render();
       }));
+    this.shadowRoot.querySelectorAll("button[data-dismiss]").forEach((b) =>
+      b.addEventListener("click", () => this._setDismissed(b.dataset.dismiss, true)));
+    this.shadowRoot.querySelectorAll("button[data-restore]").forEach((b) =>
+      b.addEventListener("click", () => this._setDismissed(b.dataset.restore, false)));
+    this.shadowRoot.querySelector("button[data-toggle-dismissed]")?.addEventListener("click", () => {
+      this._showDismissed = !this._showDismissed;
+      this._render();
+    });
     this.shadowRoot.querySelector("a.repairs")?.addEventListener("click", (ev) => {
       ev.preventDefault();
       this._navigate("/config/repairs");

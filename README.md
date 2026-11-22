@@ -21,7 +21,7 @@ with a security score and concrete findings.
 | Failed logins chart | Access log | Failed logins per hour for the last 24 hours, peak hour and top source IP |
 | Tokens | HA's auth system | Every session and long-lived token, last use and last IP; long-lived tokens unused for 90 days are marked stale |
 | Connections | Socket scan + HTTP tracing | Open connections to internet hosts and a 24-hour history with first and last seen, labelled with the integration that made them |
-| Findings | Configuration checks | Users without MFA, stale tokens, IP banning disabled, plain-HTTP external URL, failed-login bursts, custom integrations |
+| Findings | Configuration checks | Users without MFA, service accounts with a password login, stale tokens, IP banning disabled, plain-HTTP external URL, failed-login bursts, custom integrations. Findings you accept on purpose can be dismissed: they leave the score and Repairs, and come back if something changes |
 | Repairs | Findings | Important findings also appear in **Settings > Repairs** |
 
 The access log and the connection history are stored on disk, so they survive

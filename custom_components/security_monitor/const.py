@@ -29,6 +29,8 @@ WS_AUTH_LOG: Final = f"{DOMAIN}/auth_log"
 WS_CONNECTIONS: Final = f"{DOMAIN}/connections"
 WS_SUBSCRIBE: Final = f"{DOMAIN}/subscribe"
 WS_RUN_CHECKS: Final = f"{DOMAIN}/run_checks"
+WS_DISMISS_FINDING: Final = f"{DOMAIN}/dismiss_finding"
+WS_RESTORE_FINDING: Final = f"{DOMAIN}/restore_finding"
 
 # Dispatcher signal fired whenever new auth events or scan results arrive
 SIGNAL_UPDATED: Final = f"{DOMAIN}_updated"

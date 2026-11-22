@@ -1,8 +1,8 @@
-"""Persist the access log and destination history across restarts.
+"""Persist the access log, destination history and dismissed findings across restarts.
 
 Stored in <config>/.storage/security_monitor.history. Only hostnames, IPs,
-integration names, counts and timestamps are kept, never URLs, paths or
-payloads.
+integration names, counts, timestamps and dismissed finding IDs are kept,
+never URLs, paths or payloads.
 """
 
 from __future__ import annotations
@@ -79,6 +79,12 @@ class HistoryStore:
             async_track_time_interval(self.hass, _save, SAVE_INTERVAL),
             self.hass.bus.async_listen_once(EVENT_HOMEASSISTANT_STOP, _on_stop),
         ]
+
+    @callback
+    def async_save_soon(self) -> None:
+        """Save right away, e.g. after the user dismissed a finding."""
+        if self._data_func is not None:
+            self._store.async_delay_save(self._data_func, 0)
 
     async def async_stop(self) -> None:
         """Unload: stop the timer and save once more."""

@@ -1,6 +1,7 @@
 """HTTP tracing attribution and persistence across a reload."""
 
 import importlib.util
+from datetime import timedelta
 import logging
 from pathlib import Path
 
@@ -11,6 +12,7 @@ from pytest_homeassistant_custom_component.common import MockConfigEntry
 from homeassistant.config_entries import ConfigEntryState
 from homeassistant.core import HomeAssistant
 from homeassistant.setup import async_setup_component
+from homeassistant.util import dt as dt_util
 
 DOMAIN = "security_monitor"
 
@@ -102,16 +104,20 @@ async def test_tracer_and_persistence(hass: HomeAssistant, hass_storage, socket_
 
 async def test_imports_history_from_security_dashboard(hass: HomeAssistant, hass_storage):
     """First start after the rename takes over the old integration's history."""
+    # Relative times: the tracer drops hosts not seen for 7 days
+    now = dt_util.utcnow()
+    since = (now - timedelta(days=6)).isoformat()
+    recent = (now - timedelta(hours=1)).isoformat()
     hass_storage["security_dashboard.history"] = {
         "version": 1,
         "minor_version": 1,
         "key": "security_dashboard.history",
         "data": {
-            "auth": {"events": [{"timestamp": "2026-11-07T01:00:00+00:00", "kind": "failed_login",
+            "auth": {"events": [{"timestamp": recent, "kind": "failed_login",
                                  "ip": "203.0.113.47", "user": None, "detail": "Invalid"}]},
-            "network": {"monitoring_since": "2026-11-01T00:00:00+00:00", "sockets": [], "hosts": {}},
-            "http": {"hosts": {"api.github.com": {"integrations": {"hacs": 3}, "first_seen": "2026-11-01T00:00:00+00:00",
-                                                  "last_seen": "2026-11-07T01:00:00+00:00", "hourly": {}}},
+            "network": {"monitoring_since": since, "sockets": [], "hosts": {}},
+            "http": {"hosts": {"api.github.com": {"integrations": {"hacs": 3}, "first_seen": since,
+                                                  "last_seen": recent, "hourly": {}}},
                      "ip_map": {}},
         },
     }
@@ -123,7 +129,7 @@ async def test_imports_history_from_security_dashboard(hass: HomeAssistant, hass
 
     data = entry.runtime_data
     assert data.auth.events[0].ip == "203.0.113.47"
-    assert data.network.monitoring_since.isoformat() == "2026-11-01T00:00:00+00:00"
+    assert data.network.monitoring_since.isoformat() == since
     assert "api.github.com" in data.tracer.hosts
     assert f"{DOMAIN}.history" in hass_storage
     assert "security_dashboard.history" not in hass_storage  # old integration isn't loaded

@@ -155,14 +155,23 @@ class AuthMonitor:
         """Whether the user can sign in with a login that MFA would protect.
 
         Users without credentials (created without a login) can't sign in at all,
-        and trusted networks don't support MFA. An unknown provider counts as
+        and trusted networks don't support MFA. When in doubt the login counts as
         capable, to stay on the cautious side.
         """
-        for cred in user.credentials:
+        return any(self._supports_mfa(cred) for cred in user.credentials)
+
+    def _supports_mfa(self, cred: Any) -> bool:
+        # Until HA 2026.10, providers had a `support_mfa` property. HA 2026.11
+        # removed it (MFA now depends on the provider's login flow); of the
+        # built-in providers, only trusted networks skip MFA.
+        try:
             provider = self.hass.auth.get_auth_provider(cred.auth_provider_type, cred.auth_provider_id)
-            if provider is None or provider.support_mfa:
-                return True
-        return False
+            supported = getattr(provider, "support_mfa", None)
+            if isinstance(supported, bool):
+                return supported
+        except Exception:  # noqa: BLE001 - semi-internal API; never break setup over it
+            _LOGGER.debug("Could not check MFA support for %s", cred.auth_provider_type, exc_info=True)
+        return cred.auth_provider_type != "trusted_networks"
 
     async def async_snapshot(self) -> dict[str, Any]:
         """Everything the panel needs about users and tokens."""

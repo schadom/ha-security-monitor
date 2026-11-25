@@ -110,10 +110,28 @@ or in executor threads. Each connection is assigned to an integration by:
 3. otherwise a library on the call stack, mapped to the integration that
    requires that library.
 
-Hostnames come from Home Assistant's HTTP client, which the integration also
-traces, so the panel shows `openapi.tuyaeu.com` and **Tuya** instead of an
-Amazon hostname. For other libraries, hostnames come from their DNS lookups,
-with reverse DNS as the last resort.
+Hostnames come from DNS lookups the audit hook sees (used by `requests`,
+httpx, MQTT, websockets and others), with reverse DNS as the last resort.
+Home Assistant's own HTTP client resolves names with its own DNS library, so
+for its traffic the panel usually shows a reverse-DNS name such as
+`ec2-…amazonaws.com`, or only an IP address. The integration is still shown
+correctly.
+
+### Advanced option: exact hostnames for HTTP requests
+
+In **Settings > Devices & services > Security Monitor > Configure** you can turn
+on **Exact hostnames for HTTP requests**. The panel then shows the real hostname
+of every request made through Home Assistant's HTTP client (e.g.
+`openapi.tuyaeu.com` instead of an Amazon hostname) and counts requests as well
+as connections.
+
+> [!WARNING]
+> This option replaces private methods of the aiohttp library
+> (`ClientSession._request` and `TCPConnector._create_direct_connection`) for
+> **all integrations**, not only this one. A future Home Assistant update that
+> changes aiohttp could then break the HTTP requests of every integration. It is
+> off by default. If integrations stop working after an update, turn it off
+> first.
 
 **New destinations.** Hosts first seen during the first hour of monitoring are
 the baseline. Hosts that appear later are marked **New** for 24 hours.
@@ -189,7 +207,8 @@ Tests exercise the config flow, panel registration, static files, sensors, the
 websocket API and live subscription, unload and reload, log parsing for real
 Home Assistant log formats, the 24-hour destination history, attribution of
 aiohttp, plain-socket, asyncio and background-task connections against a local
-server, hostname lookup, and persistence across a reload.
+server, hostname lookup, the advanced option (aiohttp left untouched by default,
+switched on and off through the options), and persistence across a reload.
 
 ## Releasing
 
@@ -204,13 +223,13 @@ draft, so HACS doesn't offer it, and explains how to fix it.
 
 ## Known limitations
 
-- **Private APIs.** The integration relies on parts of Home Assistant and
-  aiohttp that are not public API: the auth system, the ban logger's message
-  format, the config entry context, `ClientSession._request` and
-  `TCPConnector._create_direct_connection`. A Home Assistant or aiohttp update
-  can break these. Attribution itself uses Python's public audit hook API; if
-  the aiohttp internals change, only exact hostnames for HTTP requests are lost.
-  Test against beta releases before updating production systems.
+- **Private APIs.** The integration relies on parts of Home Assistant that are
+  not public API: the auth system, the ban logger's message format and the
+  config entry context. A Home Assistant update can break these. Attribution
+  itself uses Python's public audit hook API. Only the
+  [advanced option](#advanced-option-exact-hostnames-for-http-requests), which
+  is off by default, touches aiohttp's private methods. Test against beta
+  releases before updating production systems.
 - **Add-ons and the host system** run outside Home Assistant Core, so their
   connections show as **Unattributed**.
 - **Connections opened before the integration starts** stay unattributed until
@@ -219,8 +238,9 @@ draft, so HACS doesn't offer it, and explains how to fix it.
 - **Executor threads** don't inherit the config entry context. Connections made
   there are attributed only when the integration's code or a known library is
   on the call stack.
-- **Hostnames for non-HTTP traffic** come from re-resolving recent DNS lookups.
-  Services that rotate IPs quickly may fall back to reverse DNS.
+- **Hostnames** come from re-resolving recent DNS lookups. Services that rotate
+  IPs quickly fall back to reverse DNS. Traffic from Home Assistant's own HTTP
+  client shows reverse-DNS names unless the advanced option is on.
 - **Visibility depends on the installation type.** On Home Assistant OS the
   scan sees the whole host network but cannot attribute add-on traffic. In
   Container installations it sees only the container's network.

@@ -25,6 +25,7 @@ from homeassistant.loader import async_get_integration
 from . import websocket_api
 from .auth_monitor import AuthMonitor
 from .const import (
+    CONF_AIOHTTP_HOSTNAMES,
     DOMAIN,
     PANEL_ICON,
     PANEL_JS,
@@ -77,8 +78,11 @@ async def async_setup_entry(hass: HomeAssistant, entry: SecurityConfigEntry) -> 
     auth = AuthMonitor(hass, restored.get("auth"))
     await auth.async_start()
 
-    # Attribute outbound connections to integrations (audit hook + aiohttp layer)
-    tracer = ConnectionTracer(hass, restored.get("http"))
+    # Attribute outbound connections to integrations: audit hook, plus the aiohttp
+    # layer only if the user turned on the advanced option
+    tracer = ConnectionTracer(
+        hass, restored.get("http"), aiohttp_layer=entry.options.get(CONF_AIOHTTP_HOSTNAMES, False)
+    )
     tracer.start()
 
     network = NetworkCoordinator(hass, entry, tracer, restored.get("network"))
@@ -90,6 +94,8 @@ async def async_setup_entry(hass: HomeAssistant, entry: SecurityConfigEntry) -> 
 
     entry.async_on_unload(auth.async_stop)
     entry.async_on_unload(tracer.stop)
+    # Changing the options reloads the entry, which switches the aiohttp layer on or off
+    entry.async_on_unload(entry.add_update_listener(_async_options_updated))
 
     # Persist access log, destination history and dismissed findings every 5 min and on shutdown
     data = entry.runtime_data
@@ -128,6 +134,10 @@ async def async_setup_entry(hass: HomeAssistant, entry: SecurityConfigEntry) -> 
     # Surface findings (no MFA, stale tokens, ip_ban disabled…) in Settings → Repairs
     await async_check_issues(hass, entry)
     return True
+
+
+async def _async_options_updated(hass: HomeAssistant, entry: SecurityConfigEntry) -> None:
+    await hass.config_entries.async_reload(entry.entry_id)
 
 
 async def async_unload_entry(hass: HomeAssistant, entry: SecurityConfigEntry) -> bool:

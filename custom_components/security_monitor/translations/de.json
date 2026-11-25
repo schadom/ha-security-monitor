@@ -10,6 +10,20 @@
       "single_instance_allowed": "Security Monitor ist bereits eingerichtet."
     }
   },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Erweiterte Optionen",
+        "description": "**Exakte Hostnamen für HTTP-Anfragen** zeigt den echten Hostnamen jeder Anfrage über den HTTP-Client von Home Assistant. Ohne diese Option zeigt die Verbindungsliste Namen aus DNS-Abfragen oder Reverse-DNS und manchmal nur eine IP-Adresse.\n\n⚠️ **Warnung:** Dabei werden private Methoden der Bibliothek aiohttp für **alle Integrationen** ersetzt, nicht nur für diese. Ein künftiges Home-Assistant-Update, das aiohttp ändert, könnte dann die HTTP-Anfragen aller Integrationen stören. Aktiviere die Option nur, wenn du dieses Risiko akzeptierst, und deaktiviere sie zuerst, falls nach einem Update Integrationen nicht mehr funktionieren.",
+        "data": {
+          "aiohttp_hostnames": "Exakte Hostnamen für HTTP-Anfragen (betrifft alle Integrationen)"
+        },
+        "data_description": {
+          "aiohttp_hostnames": "Standardmäßig aus. Beim Speichern wird Security Monitor neu geladen."
+        }
+      }
+    }
+  },
   "entity": {
     "sensor": {
       "outbound_connections": { "name": "Ausgehende Verbindungen" },

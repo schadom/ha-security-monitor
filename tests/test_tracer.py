@@ -28,7 +28,8 @@ def _load_fake_integration():
 
 async def test_tracer_and_persistence(hass: HomeAssistant, hass_storage, socket_enabled):
     assert await async_setup_component(hass, "http", {})
-    entry = MockConfigEntry(domain=DOMAIN, data={})
+    # With the advanced option on: exact hostnames from the aiohttp layer
+    entry = MockConfigEntry(domain=DOMAIN, data={}, options={"aiohttp_hostnames": True})
     entry.add_to_hass(hass)
     assert await hass.config_entries.async_setup(entry.entry_id)
     await hass.async_block_till_done()
@@ -143,7 +144,7 @@ async def test_tracer_unhooks_without_removing_later_wrappers(hass: HomeAssistan
     from custom_components.security_monitor.connection_tracer import ConnectionTracer
 
     original = aiohttp.ClientSession._request
-    tracer = ConnectionTracer(hass)
+    tracer = ConnectionTracer(hass, aiohttp_layer=True)
     tracer.start()
     ours = aiohttp.ClientSession._request
 
@@ -159,7 +160,66 @@ async def test_tracer_unhooks_without_removing_later_wrappers(hass: HomeAssistan
         aiohttp.ClientSession._request = original
 
     # Normal case: nothing on top → original methods are restored
-    tracer2 = ConnectionTracer(hass)
+    tracer2 = ConnectionTracer(hass, aiohttp_layer=True)
     tracer2.start()
     tracer2.stop()
+    assert aiohttp.ClientSession._request is original
+
+
+async def test_aiohttp_is_left_alone_by_default(hass: HomeAssistant, socket_enabled):
+    """Without the advanced option, aiohttp's private methods are never replaced."""
+    assert await async_setup_component(hass, "http", {})
+    original = (aiohttp.ClientSession._request, aiohttp.TCPConnector._create_direct_connection)
+    entry = MockConfigEntry(domain=DOMAIN, data={})
+    entry.add_to_hass(hass)
+    assert await hass.config_entries.async_setup(entry.entry_id)
+    await hass.async_block_till_done()
+    tracer = entry.runtime_data.tracer
+    assert (aiohttp.ClientSession._request, aiohttp.TCPConnector._create_direct_connection) == original
+    assert tracer.capabilities == {"audit_hook": True, "aiohttp": False, "aiohttp_enabled": False}
+
+    # Requests made with aiohttp are still attributed, through the audit hook
+    async def _ok(request):
+        return web.Response(text="ok")
+
+    app = web.Application()
+    app.router.add_get("/", _ok)
+    runner = web.AppRunner(app)
+    await runner.setup()
+    site = web.TCPSite(runner, "127.0.0.1", 0)
+    await site.start()
+    port = site._server.sockets[0].getsockname()[1]
+    tracer.include_local = True
+    fake = _load_fake_integration()
+    async with aiohttp.ClientSession() as session:
+        assert await fake.fetch(session, f"http://127.0.0.1:{port}/") == "ok"
+    await runner.cleanup()
+    tracer.process_pending()
+    assert tracer.hosts == {}  # no request counting without the aiohttp layer
+    assert tracer.connects["127.0.0.1"]["integrations"] == {"fake_cloud": 1}
+    tracer.include_local = False
+
+
+async def test_options_switch_the_aiohttp_layer(hass: HomeAssistant):
+    """Saving the options reloads the integration and turns the layer on or off."""
+    assert await async_setup_component(hass, "http", {})
+    original = aiohttp.ClientSession._request
+    entry = MockConfigEntry(domain=DOMAIN, data={})
+    entry.add_to_hass(hass)
+    assert await hass.config_entries.async_setup(entry.entry_id)
+    await hass.async_block_till_done()
+
+    result = await hass.config_entries.options.async_init(entry.entry_id)
+    assert result["type"] == "form" and result["step_id"] == "init"
+    result = await hass.config_entries.options.async_configure(result["flow_id"], {"aiohttp_hostnames": True})
+    await hass.async_block_till_done()
+    assert result["type"] == "create_entry"
+    assert entry.options == {"aiohttp_hostnames": True}
+    assert entry.runtime_data.tracer.capabilities["aiohttp"] is True
+    assert getattr(aiohttp.ClientSession._request, "_security_monitor_tracer", False)
+
+    result = await hass.config_entries.options.async_init(entry.entry_id)
+    await hass.config_entries.options.async_configure(result["flow_id"], {"aiohttp_hostnames": False})
+    await hass.async_block_till_done()
+    assert entry.runtime_data.tracer.capabilities["aiohttp"] is False
     assert aiohttp.ClientSession._request is original

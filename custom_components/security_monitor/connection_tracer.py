@@ -9,7 +9,7 @@ Two layers:
    Python feature, so it does not depend on any library's internals. For each
    outbound TCP connection we record the peer IP and the integration, found by:
      a. walking the call stack to the first frame of an integration,
-     b. the caller handed down by the aiohttp layer (context variable),
+     b. the caller handed down by the aiohttp layer, if enabled (context variable),
      c. Home Assistant's `current_entry` context: it is set while a config
         entry sets up and is inherited by the tasks and timers created then,
         so background polling is attributed even with no integration code on
@@ -17,16 +17,21 @@ Two layers:
      d. a library frame on the stack, mapped to the integration that requires
         that library.
 
-2. aiohttp layer (exact hostnames, optional).
+2. aiohttp layer (exact hostnames, opt-in, OFF by default).
    The audit hook sees the IP a connection goes to, but HA's HTTP client
-   resolves names with its own DNS library, so the hostname is not visible
-   there. Wrapping aiohttp (ClientSession._request and
-   TCPConnector._create_direct_connection, private API) records the hostname
-   of each request. If a future aiohttp version changes these, this layer
-   switches itself off and attribution keeps working; only those hostnames are
-   lost. For connections made by other libraries, hostnames come from their
-   DNS lookups (getaddrinfo), which are resolved again in the background and
-   matched against the connected IPs, with reverse DNS as the last resort.
+   resolves names with its own DNS library (aiodns), so no getaddrinfo event
+   carries the hostname. With the advanced option "exact hostnames for HTTP
+   requests" turned on, aiohttp's private ClientSession._request and
+   TCPConnector._create_direct_connection are wrapped to record the hostname of
+   each request. They are replaced on the classes, so the wrapper sits in the
+   HTTP path of every integration; a changed signature in a future aiohttp
+   release could break requests of every integration, which is why it is
+   off by default.
+
+   Without it, hostnames come from DNS lookups seen by the audit hook
+   (getaddrinfo, used by requests, httpx, MQTT, websockets…), resolved again in
+   the background and matched against the connected IPs, with reverse DNS as
+   the last resort.
 
 Privacy: only hostnames, IPs, integration names, counts and timestamps are
 kept, never URLs, paths, query strings, headers or bodies. LAN and loopback
@@ -198,14 +203,23 @@ def _install_audit_hook(reg: types.ModuleType) -> bool:
 class ConnectionTracer:
     """Per-host request/connection stats and a peer-IP → host/integration map."""
 
-    def __init__(self, hass: HomeAssistant, restored: dict[str, Any] | None = None) -> None:
+    def __init__(
+        self,
+        hass: HomeAssistant,
+        restored: dict[str, Any] | None = None,
+        *,
+        aiohttp_layer: bool = False,
+    ) -> None:
         self.hass = hass
+        # Wrap aiohttp's private methods for exact hostnames (advanced option, off by default)
+        self.aiohttp_layer = aiohttp_layer
         # host -> {"integrations": {name: n}, "first_seen", "last_seen", "hourly": {hour: n}}
-        self.hosts: dict[str, dict[str, Any]] = {}      # HTTP requests (aiohttp layer)
+        self.hosts: dict[str, dict[str, Any]] = {}      # HTTP requests (aiohttp layer, if enabled)
         self.connects: dict[str, dict[str, Any]] = {}   # TCP connects (audit hook), keyed by host or IP
         # peer ip -> {"host": str | None, "integration": str | None, "ts": epoch seconds}
         self.ip_map: dict[str, dict[str, Any]] = {}
-        self.capabilities = {"audit_hook": False, "aiohttp": False}
+        # aiohttp_enabled: the option is on; aiohttp: the layer is actually active
+        self.capabilities = {"audit_hook": False, "aiohttp": False, "aiohttp_enabled": aiohttp_layer}
         # Only outbound (internet) traffic matters here; LAN devices are skipped
         self.include_local = False
         self._lib_to_domain: dict[str, str] = {}
@@ -232,6 +246,8 @@ class ConnectionTracer:
         self.capabilities["audit_hook"] = _install_audit_hook(reg)
         reg.tracer = self
         self._active = True
+        if not self.aiohttp_layer:
+            return
         try:
             self._start_aiohttp_layer()
         except Exception as err:  # noqa: BLE001 - private aiohttp API moved

@@ -168,12 +168,12 @@ async def test_own_lookups_and_stopped_tracer_are_ignored(hass: HomeAssistant, m
 async def test_attribution_survives_missing_aiohttp_internals(hass: HomeAssistant, monkeypatch, socket_enabled):
     """If aiohttp's private API moves, only the hostname layer switches off."""
     monkeypatch.delattr(aiohttp.TCPConnector, "_create_direct_connection")
-    tracer = ConnectionTracer(hass)
+    tracer = ConnectionTracer(hass, aiohttp_layer=True)
     tracer.include_local = True
     tracer.start()
     server, port = await _start_server()
     try:
-        assert tracer.capabilities == {"audit_hook": True, "aiohttp": False}
+        assert tracer.capabilities == {"audit_hook": True, "aiohttp": False, "aiohttp_enabled": True}
         fake = _load_fake_integration()
         await fake.asyncio_connect("127.0.0.1", port)
         assert _connects(tracer) == {"fake_cloud": 1}

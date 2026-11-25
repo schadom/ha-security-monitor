@@ -20,6 +20,11 @@ NETWORK_SCAN_INTERVAL: Final = timedelta(seconds=30)
 AUTH_EVENT_BUFFER: Final = 500  # max auth events kept in memory
 STALE_TOKEN_DAYS: Final = 90
 
+# Options
+# Wrap aiohttp's private methods to record exact hostnames of HTTP requests.
+# Advanced and off by default: it affects the HTTP requests of every integration.
+CONF_AIOHTTP_HOSTNAMES: Final = "aiohttp_hostnames"
+
 # Logger that HA's http ban middleware writes failed-login warnings to
 BAN_LOGGER: Final = "homeassistant.components.http.ban"
 

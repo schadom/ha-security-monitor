@@ -10,6 +10,20 @@
       "single_instance_allowed": "Security Monitor is already set up."
     }
   },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Advanced options",
+        "description": "**Exact hostnames for HTTP requests** shows the real hostname of every request made through Home Assistant's HTTP client. Without it, the Connections list shows names from DNS lookups or reverse DNS, and sometimes only an IP address.\n\n⚠️ **Warning:** this replaces private methods of the aiohttp library for **all integrations**, not only this one. A future Home Assistant update that changes aiohttp could then break the HTTP requests of every integration. Only turn it on if you accept that risk, and turn it off first if integrations stop working after an update.",
+        "data": {
+          "aiohttp_hostnames": "Exact hostnames for HTTP requests (affects all integrations)"
+        },
+        "data_description": {
+          "aiohttp_hostnames": "Off by default. Saving reloads Security Monitor."
+        }
+      }
+    }
+  },
   "entity": {
     "sensor": {
       "outbound_connections": { "name": "Outbound connections" },

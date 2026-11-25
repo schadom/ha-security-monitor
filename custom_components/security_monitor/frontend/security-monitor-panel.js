@@ -135,7 +135,9 @@ const TRANSLATIONS = /* translations:start */ {
       "other": "{count} connections"
     },
     "net.empty_24h": "No outbound traffic recorded in the last 24 h.",
-    "net.foot_24h": "Connections from Home Assistant Core are attributed for every library. Requests and exact hostnames come from Home Assistant's HTTP client.",
+    "net.foot_24h": "Connections from Home Assistant Core are attributed for every library.",
+    "net.foot_exact_off": "Hostnames come from DNS lookups or reverse DNS, so some show a provider's name or only an IP. For exact hostnames, see the advanced option under Settings › Devices & services › Security Monitor › Configure.",
+    "net.foot_exact_on": "Requests and exact hostnames come from Home Assistant's HTTP client (advanced option).",
     "net.foot_no_aiohttp": "HTTP client tracing is unavailable on this version, so some hostnames come from DNS lookups or reverse DNS.",
     "net.monitoring_since": "Monitoring since {time}.",
     "tokens.long_lived": "Long-lived",
@@ -327,7 +329,9 @@ const TRANSLATIONS = /* translations:start */ {
       "other": "{count} Verbindungen"
     },
     "net.empty_24h": "Keine ausgehenden Verbindungen in den letzten 24 h aufgezeichnet.",
-    "net.foot_24h": "Verbindungen aus Home Assistant Core werden für jede Bibliothek zugeordnet. Anfragen und exakte Hostnamen stammen aus dem HTTP-Client von Home Assistant.",
+    "net.foot_24h": "Verbindungen aus Home Assistant Core werden für jede Bibliothek zugeordnet.",
+    "net.foot_exact_off": "Hostnamen stammen aus DNS-Abfragen oder Reverse-DNS, daher zeigen manche den Namen eines Anbieters oder nur eine IP. Für exakte Hostnamen siehe die erweiterte Option unter Einstellungen › Geräte & Dienste › Security Monitor › Konfigurieren.",
+    "net.foot_exact_on": "Anfragen und exakte Hostnamen stammen aus dem HTTP-Client von Home Assistant (erweiterte Option).",
     "net.foot_no_aiohttp": "Die Nachverfolgung des HTTP-Clients ist in dieser Version nicht verfügbar, daher stammen manche Hostnamen aus DNS-Abfragen oder Reverse-DNS.",
     "net.monitoring_since": "Überwachung seit {time}.",
     "tokens.long_lived": "Langlebig",
@@ -919,7 +923,7 @@ class SecurityMonitorPanel extends HTMLElement {
       ${this._thead("24h")}
       <tbody>${rows || `<tr><td colspan="5" class="empty">${t("net.empty_24h")}</td></tr>`}</tbody>
     </table>${pager}
-    <div class="foot">${t("net.foot_24h")}${net.tracing && net.tracing.aiohttp === false ? ` ${t("net.foot_no_aiohttp")}` : ""} ${t("net.monitoring_since", { time: fmtDateTime(net.monitoring_since) })}</div>`;
+    <div class="foot">${t("net.foot_24h")} ${this._tracingNote(net.tracing)} ${t("net.monitoring_since", { time: fmtDateTime(net.monitoring_since) })}</div>`;
   }
 
   _tokensTable(d) {
@@ -946,6 +950,13 @@ class SecurityMonitorPanel extends HTMLElement {
     const params = {};
     for (const [name, value] of Object.entries(f.params || {})) params[name] = name === "count" ? value : esc(value);
     return t(key, params);
+  }
+
+  // Where hostnames come from: the opt-in aiohttp layer, or DNS lookups / reverse DNS
+  _tracingNote(tracing) {
+    if (!tracing) return "";
+    if (tracing.aiohttp_enabled === false) return t("net.foot_exact_off");
+    return tracing.aiohttp ? t("net.foot_exact_on") : t("net.foot_no_aiohttp");
   }
 
   _findingRow(f, dismissed) {
